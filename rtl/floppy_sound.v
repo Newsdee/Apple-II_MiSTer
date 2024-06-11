@@ -17,8 +17,8 @@ module floppy_sound (
 );
 
 // PWM
-reg [7:0]counter=0;
-wire tc= counter[7:1]==(7'b1111111);
+reg [5:0]counter=0;
+wire tc= counter[5:1]==(5'b111111);
 always @(posedge clk) counter<= tc ? 0 : counter+1;
 
 wire [7:0]mix = inte[7:1]+inte[7:2]+{pulse,4'b0000}+{mnoise,2'b00}+22;

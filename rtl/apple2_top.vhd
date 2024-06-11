@@ -73,6 +73,7 @@ port (
 
 	-- mocking board
 	mb_enabled 		: in std_logic;
+	speaker_enabled : in std_logic;
 	
 	-- disk control
 	TRACK1         : out unsigned( 5 downto 0); -- Current track (0-34)
@@ -206,6 +207,7 @@ architecture arch of apple2_top is
   signal a_ram: unsigned(17 downto 0);
   
   signal speaker_a2: std_logic;
+  signal speaker_actual: std_logic;
   signal speaker_floppy: std_logic;
   signal psg_audio_l : unsigned(9 downto 0);
   signal psg_audio_r : unsigned(9 downto 0);
@@ -414,7 +416,7 @@ begin
     TRACK2_BUSY    => TRACK2_BUSY,
 	
 	-- floppy sound emulation
-	SPEAKER_I	   => speaker_a2,
+	SPEAKER_I	   => speaker_actual,
 	SPEAKER_O      => speaker_floppy
     );
 	 
@@ -497,9 +499,12 @@ begin
 	  unsigned(DATA_OUT) => CLOCK_DO,
 	  RTC             => RTC
 	  );
+  
 
-  audio(6) <= speaker_floppy when DISK_SOUND = '1' else '0'; 
-  audio(7) <= speaker_a2 when DISK_SOUND = '0' else speaker_floppy;
+  speaker_actual <= speaker_a2 when speaker_enabled = '1' else '0';
+  audio(7) <= speaker_actual when DISK_SOUND = '0' else speaker_floppy;
+  
+  
   
   audio(5 downto 0) <= (others => '0');
   audio(9 downto 8) <= (others => '0');

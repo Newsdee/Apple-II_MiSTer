@@ -205,7 +205,7 @@ video_freak video_freak
 // 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// X   XXXXXXXXXXXXXXXXXXXXXXXX     X
+// X   XXXXXXXXXXXXXXXXXXXXXXXX     XX
 
 `include "build_id.v" 
 parameter CONF_STR = {
@@ -231,6 +231,7 @@ parameter CONF_STR = {
 	"P1-;",	
 	"P2,Audio & Video;",
 	"P2-;",	
+	"P2o1,Speaker,Yes,No;",
 	"P2O4,Mocking board,Yes,No;",
 	"P2O78,Stereo mix,none,25%,50%,100%;",
 	"P2-;",	
@@ -444,6 +445,7 @@ apple2_top apple2_top
 	.joy_an(joya),
 
 	.mb_enabled(~status[4]),
+	.speaker_enabled(~status[33]),
 	
 	.TRACK1(TRACK1),
 	.TRACK1_ADDR(TRACK1_RAM_ADDR),
