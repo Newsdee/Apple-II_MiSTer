@@ -25,9 +25,6 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity vga_controller is
-	generic (
-		ENABLE_VERTICAL_COMB : boolean := true
-	);
 	port (
 		CLK_14M    : in  std_logic;	     -- 14.31818 MHz master clock
 
@@ -36,6 +33,7 @@ entity vga_controller is
 		SCREEN_MODE: in std_logic_vector(1 downto 0);   -- 00: Color, 01: B&W, 10: Green, 11: Amber
 		COLOR_PALETTE: in std_logic_vector(1 downto 0); -- 4 palette choices
 		GRAY_SEAM_FIX: in std_logic;
+		NTSC_VERTICAL_COMB: in std_logic;
 		HBL        : in std_logic;
 		VBL        : in std_logic;
 
@@ -510,6 +508,10 @@ process (CLK_14M)
 	variable next_color_mode, next_color_line : std_logic_vector(0 to 4);
 	variable output_rgb : unsigned(23 downto 0);
 	variable left_black, right_black, left_white, right_white : boolean;
+	variable seam_replaced : boolean;
+	variable center_edge, chroma_edge, left_continuity, right_continuity : integer;
+	variable center_neighbor_luma, neighbor_luma_average : integer;
+	variable left_distance, right_distance, neighbor_distance : integer;
 begin
 	if rising_edge(CLK_14M) then
 		for index in 0 to 3 loop
@@ -533,6 +535,7 @@ begin
 		next_color_line(4) := raw_color_line;
 
 		output_rgb := next_rgb(2);
+		seam_replaced := false;
 		left_black := next_saturation(1) < 14 and next_saturation(0) < 14 and
 			next_luma(1) < 28 and next_luma(0) < 36;
 		right_black := next_saturation(3) < 14 and next_saturation(4) < 14 and
@@ -550,6 +553,97 @@ begin
 				output_rgb := next_rgb(1);
 			else
 				output_rgb := next_rgb(3);
+			end if;
+			seam_replaced := true;
+		end if;
+
+		-- Broader JS neutral-seam pass: remove an isolated neutral pixel at a
+		-- strong edge, including color/black and color/white transitions.
+		if GRAY_SEAM_FIX = '1' and not seam_replaced and
+			next_color_line(2) = '1' and next_valid = "11111" and
+			next_saturation(2) <= 12 then
+			center_edge := abs(next_luma(1) - next_luma(3));
+			chroma_edge := abs(next_saturation(1) - next_saturation(3));
+			left_continuity := abs(next_luma(1) - next_luma(0)) +
+				abs(next_saturation(1) - next_saturation(0)) / 2;
+			right_continuity := abs(next_luma(3) - next_luma(4)) +
+				abs(next_saturation(3) - next_saturation(4)) / 2;
+			if (center_edge >= 48 or chroma_edge >= 32) and
+				(left_continuity <= 36 or right_continuity <= 36) then
+				if abs(next_luma(2) - next_luma(1)) <= 72 or
+					abs(next_luma(2) - next_luma(3)) <= 72 then
+					if left_continuity <= right_continuity then
+						output_rgb := next_rgb(1);
+					else
+						output_rgb := next_rgb(3);
+					end if;
+					seam_replaced := true;
+				end if;
+			end if;
+		end if;
+
+		-- Color-to-color pass: a neutral center between two saturated colors
+		-- is corrected only when both sides have similar luma.
+		if GRAY_SEAM_FIX = '1' and not seam_replaced and
+			next_color_line(2) = '1' and next_valid = "11111" and
+			next_saturation(2) <= 18 and next_saturation(1) >= 44 and
+			next_saturation(3) >= 44 and
+			abs(next_luma(1) - next_luma(3)) < 54 and
+			next_luma(1) >= 36 and next_luma(3) >= 36 then
+			left_continuity := abs(next_luma(1) - next_luma(0)) +
+				abs(next_saturation(1) - next_saturation(0)) / 2;
+			right_continuity := abs(next_luma(3) - next_luma(4)) +
+				abs(next_saturation(3) - next_saturation(4)) / 2;
+			if left_continuity <= 36 or right_continuity <= 36 then
+				if abs(left_continuity - right_continuity) < 10 then
+					if next_saturation(1) >= next_saturation(3) then
+						output_rgb := next_rgb(1);
+					else
+						output_rgb := next_rgb(3);
+					end if;
+				elsif left_continuity < right_continuity then
+					output_rgb := next_rgb(1);
+				else
+					output_rgb := next_rgb(3);
+				end if;
+				seam_replaced := true;
+			end if;
+		end if;
+
+		-- Isolated RGB outlier pass: replace a center that is far from two
+		-- mutually similar neighbors without crossing a luma edge.
+		if GRAY_SEAM_FIX = '1' and not seam_replaced and
+			next_color_line(2) = '1' and next_valid = "11111" then
+			left_distance := abs(to_integer(next_rgb(1)(23 downto 16)) -
+				to_integer(next_rgb(3)(23 downto 16))) +
+				abs(to_integer(next_rgb(1)(15 downto 8)) -
+				to_integer(next_rgb(3)(15 downto 8))) +
+				abs(to_integer(next_rgb(1)(7 downto 0)) -
+				to_integer(next_rgb(3)(7 downto 0)));
+			right_distance := abs(to_integer(next_rgb(1)(23 downto 16)) -
+				to_integer(next_rgb(2)(23 downto 16))) +
+				abs(to_integer(next_rgb(1)(15 downto 8)) -
+				to_integer(next_rgb(2)(15 downto 8))) +
+				abs(to_integer(next_rgb(1)(7 downto 0)) -
+				to_integer(next_rgb(2)(7 downto 0)));
+			neighbor_distance := abs(to_integer(next_rgb(3)(23 downto 16)) -
+				to_integer(next_rgb(2)(23 downto 16))) +
+				abs(to_integer(next_rgb(3)(15 downto 8)) -
+				to_integer(next_rgb(2)(15 downto 8))) +
+				abs(to_integer(next_rgb(3)(7 downto 0)) -
+				to_integer(next_rgb(2)(7 downto 0)));
+			center_neighbor_luma := (next_luma(1) + next_luma(3)) / 2;
+			neighbor_luma_average := abs(next_luma(2) - center_neighbor_luma);
+			if next_saturation(2) <= 18 and
+				left_distance <= 72 and left_distance >= 0 and
+				right_distance >= 86 and neighbor_distance >= 86 and
+				neighbor_luma_average <= 58 then
+				if next_saturation(1) >= next_saturation(3) then
+					output_rgb := next_rgb(1);
+				else
+					output_rgb := next_rgb(3);
+				end if;
+				seam_replaced := true;
 			end if;
 		end if;
 
@@ -594,18 +688,25 @@ end process vertical_line_buffer;
 process (CLK_14M)
 	variable output_rgb : unsigned(23 downto 0);
 	variable current_luma, previous_luma : integer;
+	variable output_luma : integer;
 	variable red_chroma, green_chroma, blue_chroma : integer;
 begin
 	if rising_edge(CLK_14M) then
 		output_rgb := current_rgb_q;
 		filtered_active <= current_active_q;
-		if current_active_q = '1' and line_valid_q = '1' and color_mode_q = '1' then
+		if NTSC_VERTICAL_COMB = '1' and current_active_q = '1' and
+			line_valid_q = '1' and color_mode_q = '1' then
 			current_luma := (306 * to_integer(current_rgb_q(23 downto 16)) +
 				601 * to_integer(current_rgb_q(15 downto 8)) +
 				117 * to_integer(current_rgb_q(7 downto 0)) + 512) / 1024;
 			previous_luma := (306 * to_integer(previous_rgb_q(23 downto 16)) +
 				601 * to_integer(previous_rgb_q(15 downto 8)) +
 				117 * to_integer(previous_rgb_q(7 downto 0)) + 512) / 1024;
+			if abs(current_luma - previous_luma) <= 48 then
+				output_luma := (current_luma + previous_luma) / 2;
+			else
+				output_luma := current_luma;
+			end if;
 
 			red_chroma := (to_integer(current_rgb_q(23 downto 16)) - current_luma +
 				to_integer(previous_rgb_q(23 downto 16)) - previous_luma) / 2;
@@ -614,19 +715,19 @@ begin
 			blue_chroma := (to_integer(current_rgb_q(7 downto 0)) - current_luma +
 				to_integer(previous_rgb_q(7 downto 0)) - previous_luma) / 2;
 
-			output_rgb := clamp_rgb(current_luma + red_chroma) &
-				clamp_rgb(current_luma + green_chroma) &
-				clamp_rgb(current_luma + blue_chroma);
+			output_rgb := clamp_rgb(output_luma + red_chroma) &
+				clamp_rgb(output_luma + green_chroma) &
+				clamp_rgb(output_luma + blue_chroma);
 		end if;
 		filtered_rgb <= output_rgb;
 	end if;
 end process vertical_comb_filter;
 
-VGA_R <= filtered_rgb(23 downto 16) when ENABLE_VERTICAL_COMB else seam_rgb(23 downto 16);
-VGA_G <= filtered_rgb(15 downto 8) when ENABLE_VERTICAL_COMB else seam_rgb(15 downto 8);
-VGA_B <= filtered_rgb(7 downto 0) when ENABLE_VERTICAL_COMB else seam_rgb(7 downto 0);
+VGA_R <= filtered_rgb(23 downto 16);
+VGA_G <= filtered_rgb(15 downto 8);
+VGA_B <= filtered_rgb(7 downto 0);
 
 VGA_VBL <= vbl_delayed;
-VGA_HBL <= not filtered_active when ENABLE_VERTICAL_COMB else not seam_active;
+VGA_HBL <= not filtered_active;
 
 end rtl;
