@@ -92,6 +92,9 @@ architecture rtl of vga_controller is
 	type rgb_line_ram_t is array (0 to 559) of unsigned(23 downto 0);
 	signal previous_line_rgb : rgb_line_ram_t;
 	signal previous_line_valid : std_logic := '0';
+	signal line_wr_addr : unsigned(10 downto 0) := (others => '0');
+	signal line_wr_data : unsigned(23 downto 0) := (others => '0');
+	signal line_wr_en : std_logic := '0';
 	signal raw_rgb, seam_rgb, previous_rgb_q, current_rgb_q, filtered_rgb : unsigned(23 downto 0);
 	signal raw_hcount : unsigned(10 downto 0);
 	signal raw_active, raw_vbl, raw_color_mode, raw_color_line : std_logic;
@@ -360,7 +363,11 @@ begin
 				end case;
 			end if;
 			
-		elsif shift_reg(0) = shift_reg(4) and shift_reg(5) = shift_reg(1) then
+		-- Sharper mode also colorizes non-periodic transition dots through the
+		-- LUT (AppleWin-style) instead of rendering them gray; lit dots always
+		-- map to a non-black color, so the on/off silhouette is preserved.
+		elsif (shift_reg(0) = shift_reg(4) and shift_reg(5) = shift_reg(1)) or
+			(GRAY_SEAM_FIX = '1' and (shift_reg(3 downto 2) = "01" or shift_reg(3 downto 2) = "10")) then
 		 			
 			-- rotate the 4-bit value based on contents of shift register
 			-- then apply the color mapping
@@ -507,11 +514,6 @@ process (CLK_14M)
 	variable next_valid, next_vbl : std_logic_vector(0 to 4);
 	variable next_color_mode, next_color_line : std_logic_vector(0 to 4);
 	variable output_rgb : unsigned(23 downto 0);
-	variable left_black, right_black, left_white, right_white : boolean;
-	variable seam_replaced : boolean;
-	variable center_edge, chroma_edge, left_continuity, right_continuity : integer;
-	variable center_neighbor_luma, neighbor_luma_average : integer;
-	variable left_distance, right_distance, neighbor_distance : integer;
 begin
 	if rising_edge(CLK_14M) then
 		for index in 0 to 3 loop
@@ -534,118 +536,9 @@ begin
 		next_color_mode(4) := raw_color_mode;
 		next_color_line(4) := raw_color_line;
 
+		-- Colorization now happens in the pixel generator; this stage is a
+		-- fixed two-dot delay so latency matches earlier builds.
 		output_rgb := next_rgb(2);
-		seam_replaced := false;
-		left_black := next_saturation(1) < 14 and next_saturation(0) < 14 and
-			next_luma(1) < 28 and next_luma(0) < 36;
-		right_black := next_saturation(3) < 14 and next_saturation(4) < 14 and
-			next_luma(3) < 28 and next_luma(4) < 36;
-		left_white := next_saturation(1) < 14 and next_saturation(0) < 14 and
-			next_luma(1) > 226 and next_luma(0) > 218;
-		right_white := next_saturation(3) < 14 and next_saturation(4) < 14 and
-			next_luma(3) > 226 and next_luma(4) > 218;
-
-		if GRAY_SEAM_FIX = '1' and next_color_line(2) = '1' and
-			next_valid = "11111" and next_saturation(2) <= 10 and
-			next_luma(2) >= 36 and next_luma(2) <= 220 and
-			((left_black and right_white) or (left_white and right_black)) then
-			if abs(next_luma(2) - next_luma(1)) <= abs(next_luma(2) - next_luma(3)) then
-				output_rgb := next_rgb(1);
-			else
-				output_rgb := next_rgb(3);
-			end if;
-			seam_replaced := true;
-		end if;
-
-		-- Broader JS neutral-seam pass: remove an isolated neutral pixel at a
-		-- strong edge, including color/black and color/white transitions.
-		if GRAY_SEAM_FIX = '1' and not seam_replaced and
-			next_color_line(2) = '1' and next_valid = "11111" and
-			next_saturation(2) <= 12 then
-			center_edge := abs(next_luma(1) - next_luma(3));
-			chroma_edge := abs(next_saturation(1) - next_saturation(3));
-			left_continuity := abs(next_luma(1) - next_luma(0)) +
-				abs(next_saturation(1) - next_saturation(0)) / 2;
-			right_continuity := abs(next_luma(3) - next_luma(4)) +
-				abs(next_saturation(3) - next_saturation(4)) / 2;
-			if (center_edge >= 48 or chroma_edge >= 32) and
-				(left_continuity <= 36 or right_continuity <= 36) then
-				if abs(next_luma(2) - next_luma(1)) <= 72 or
-					abs(next_luma(2) - next_luma(3)) <= 72 then
-					if left_continuity <= right_continuity then
-						output_rgb := next_rgb(1);
-					else
-						output_rgb := next_rgb(3);
-					end if;
-					seam_replaced := true;
-				end if;
-			end if;
-		end if;
-
-		-- Color-to-color pass: a neutral center between two saturated colors
-		-- is corrected only when both sides have similar luma.
-		if GRAY_SEAM_FIX = '1' and not seam_replaced and
-			next_color_line(2) = '1' and next_valid = "11111" and
-			next_saturation(2) <= 18 and next_saturation(1) >= 44 and
-			next_saturation(3) >= 44 and
-			abs(next_luma(1) - next_luma(3)) < 54 and
-			next_luma(1) >= 36 and next_luma(3) >= 36 then
-			left_continuity := abs(next_luma(1) - next_luma(0)) +
-				abs(next_saturation(1) - next_saturation(0)) / 2;
-			right_continuity := abs(next_luma(3) - next_luma(4)) +
-				abs(next_saturation(3) - next_saturation(4)) / 2;
-			if left_continuity <= 36 or right_continuity <= 36 then
-				if abs(left_continuity - right_continuity) < 10 then
-					if next_saturation(1) >= next_saturation(3) then
-						output_rgb := next_rgb(1);
-					else
-						output_rgb := next_rgb(3);
-					end if;
-				elsif left_continuity < right_continuity then
-					output_rgb := next_rgb(1);
-				else
-					output_rgb := next_rgb(3);
-				end if;
-				seam_replaced := true;
-			end if;
-		end if;
-
-		-- Isolated RGB outlier pass: replace a center that is far from two
-		-- mutually similar neighbors without crossing a luma edge.
-		if GRAY_SEAM_FIX = '1' and not seam_replaced and
-			next_color_line(2) = '1' and next_valid = "11111" then
-			left_distance := abs(to_integer(next_rgb(1)(23 downto 16)) -
-				to_integer(next_rgb(3)(23 downto 16))) +
-				abs(to_integer(next_rgb(1)(15 downto 8)) -
-				to_integer(next_rgb(3)(15 downto 8))) +
-				abs(to_integer(next_rgb(1)(7 downto 0)) -
-				to_integer(next_rgb(3)(7 downto 0)));
-			right_distance := abs(to_integer(next_rgb(1)(23 downto 16)) -
-				to_integer(next_rgb(2)(23 downto 16))) +
-				abs(to_integer(next_rgb(1)(15 downto 8)) -
-				to_integer(next_rgb(2)(15 downto 8))) +
-				abs(to_integer(next_rgb(1)(7 downto 0)) -
-				to_integer(next_rgb(2)(7 downto 0)));
-			neighbor_distance := abs(to_integer(next_rgb(3)(23 downto 16)) -
-				to_integer(next_rgb(2)(23 downto 16))) +
-				abs(to_integer(next_rgb(3)(15 downto 8)) -
-				to_integer(next_rgb(2)(15 downto 8))) +
-				abs(to_integer(next_rgb(3)(7 downto 0)) -
-				to_integer(next_rgb(2)(7 downto 0)));
-			center_neighbor_luma := (next_luma(1) + next_luma(3)) / 2;
-			neighbor_luma_average := abs(next_luma(2) - center_neighbor_luma);
-			if next_saturation(2) <= 18 and
-				left_distance <= 72 and left_distance >= 0 and
-				right_distance >= 86 and neighbor_distance >= 86 and
-				neighbor_luma_average <= 58 then
-				if next_saturation(1) >= next_saturation(3) then
-					output_rgb := next_rgb(1);
-				else
-					output_rgb := next_rgb(3);
-				end if;
-				seam_replaced := true;
-			end if;
-		end if;
 
 		seam_rgb_window <= next_rgb;
 		seam_luma_window <= next_luma;
@@ -672,15 +565,23 @@ begin
 		line_valid_q <= previous_line_valid;
 		color_mode_q <= seam_color_mode;
 
+		-- Write is delayed one cycle so the read of address A always precedes
+		-- the write of A; old-line data no longer depends on the RAM's
+		-- read-during-write mode (M10K cannot return old data on one port).
+		line_wr_en <= '0';
 		if seam_vbl = '1' then
 			previous_line_valid <= '0';
 		elsif seam_active = '1' then
-			-- Synchronous old-data read supplies the pixel from the previous line.
 			previous_rgb_q <= previous_line_rgb(to_integer(seam_hcount));
-			previous_line_rgb(to_integer(seam_hcount)) <= seam_rgb;
+			line_wr_addr <= seam_hcount;
+			line_wr_data <= seam_rgb;
+			line_wr_en <= '1';
 			if seam_hcount = to_unsigned(559, seam_hcount'length) then
 				previous_line_valid <= '1';
 			end if;
+		end if;
+		if line_wr_en = '1' then
+			previous_line_rgb(to_integer(line_wr_addr)) <= line_wr_data;
 		end if;
 	end if;
 end process vertical_line_buffer;
@@ -688,7 +589,6 @@ end process vertical_line_buffer;
 process (CLK_14M)
 	variable output_rgb : unsigned(23 downto 0);
 	variable current_luma, previous_luma : integer;
-	variable output_luma : integer;
 	variable red_chroma, green_chroma, blue_chroma : integer;
 begin
 	if rising_edge(CLK_14M) then
@@ -702,11 +602,6 @@ begin
 			previous_luma := (306 * to_integer(previous_rgb_q(23 downto 16)) +
 				601 * to_integer(previous_rgb_q(15 downto 8)) +
 				117 * to_integer(previous_rgb_q(7 downto 0)) + 512) / 1024;
-			if abs(current_luma - previous_luma) <= 48 then
-				output_luma := (current_luma + previous_luma) / 2;
-			else
-				output_luma := current_luma;
-			end if;
 
 			red_chroma := (to_integer(current_rgb_q(23 downto 16)) - current_luma +
 				to_integer(previous_rgb_q(23 downto 16)) - previous_luma) / 2;
@@ -715,9 +610,10 @@ begin
 			blue_chroma := (to_integer(current_rgb_q(7 downto 0)) - current_luma +
 				to_integer(previous_rgb_q(7 downto 0)) - previous_luma) / 2;
 
-			output_rgb := clamp_rgb(output_luma + red_chroma) &
-				clamp_rgb(output_luma + green_chroma) &
-				clamp_rgb(output_luma + blue_chroma);
+			-- JS comb keeps each line's own luma and averages only chroma.
+			output_rgb := clamp_rgb(current_luma + red_chroma) &
+				clamp_rgb(current_luma + green_chroma) &
+				clamp_rgb(current_luma + blue_chroma);
 		end if;
 		filtered_rgb <= output_rgb;
 	end if;
