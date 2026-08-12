@@ -366,8 +366,11 @@ begin
 		-- Sharper mode also colorizes non-periodic transition dots through the
 		-- LUT (AppleWin-style) instead of rendering them gray; lit dots always
 		-- map to a non-black color, so the on/off silhouette is preserved.
+		-- Plain white<->black edges are excluded and keep the left-side level.
 		elsif (shift_reg(0) = shift_reg(4) and shift_reg(5) = shift_reg(1)) or
-			(GRAY_SEAM_FIX = '1' and (shift_reg(3 downto 2) = "01" or shift_reg(3 downto 2) = "10")) then
+			(GRAY_SEAM_FIX = '1' and (shift_reg(3 downto 2) = "01" or shift_reg(3 downto 2) = "10") and
+			not ((shift_reg(1 downto 0) = "11" and shift_reg(5 downto 4) = "00") or
+			(shift_reg(1 downto 0) = "00" and shift_reg(5 downto 4) = "11"))) then
 		 			
 			-- rotate the 4-bit value based on contents of shift register
 			-- then apply the color mapping
@@ -480,7 +483,19 @@ begin
 				
 				-- gray - we use the darkest gray of all the palettes to avoid it being too prominent
 				when "01" | "10" => 
-					if COLOR_PALETTE = "11" then
+					if GRAY_SEAM_FIX = '1' then
+						-- Only white<->black edges reach here in sharper mode.
+						if shift_reg(1) = '1' then
+							if COLOR_PALETTE = "00" then
+								r := WHITE_NTSC; g := WHITE_NTSC; b := WHITE_NTSC;
+							elsif COLOR_PALETTE = "11" then
+								r := CURRENT_COL15(23 downto 16); g := CURRENT_COL15(15 downto 8); b := CURRENT_COL15(7 downto 0);
+							else
+								r := WHITE; g := WHITE; b := WHITE;
+							end if;
+						end if;
+						-- left black keeps the background level already assigned
+					elsif COLOR_PALETTE = "11" then
 						 r := CURRENT_COL5(23 downto 16); g := CURRENT_COL5(15 downto 8); b := CURRENT_COL5(7 downto 0); -- gray 1 (darker)
 					else
 						r := X"63"; g := X"63"; b := X"63";
