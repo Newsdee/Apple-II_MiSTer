@@ -92,6 +92,7 @@ architecture rtl of vga_controller is
 	type rgb_line_ram_t is array (0 to 559) of unsigned(23 downto 0);
 	signal previous_line_rgb : rgb_line_ram_t;
 	signal previous_line_valid : std_logic := '0';
+	signal seam_active_d : std_logic := '0';
 	signal line_wr_addr : unsigned(10 downto 0) := (others => '0');
 	signal line_wr_data : unsigned(23 downto 0) := (others => '0');
 	signal line_wr_en : std_logic := '0';
@@ -584,6 +585,7 @@ begin
 		-- the write of A; old-line data no longer depends on the RAM's
 		-- read-during-write mode (M10K cannot return old data on one port).
 		line_wr_en <= '0';
+		seam_active_d <= seam_active;
 		if seam_vbl = '1' then
 			previous_line_valid <= '0';
 		elsif seam_active = '1' then
@@ -591,9 +593,10 @@ begin
 			line_wr_addr <= seam_hcount;
 			line_wr_data <= seam_rgb;
 			line_wr_en <= '1';
-			if seam_hcount = to_unsigned(559, seam_hcount'length) then
-				previous_line_valid <= '1';
-			end if;
+		elsif seam_active_d = '1' then
+			-- Any completed active line validates the buffer; HBL can rise
+			-- before hcount reaches 559, so an exact terminal count never fires.
+			previous_line_valid <= '1';
 		end if;
 		if line_wr_en = '1' then
 			previous_line_rgb(to_integer(line_wr_addr)) <= line_wr_data;
