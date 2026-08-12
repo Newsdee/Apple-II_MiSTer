@@ -100,8 +100,9 @@ architecture rtl of vga_controller is
 	signal raw_hcount : unsigned(10 downto 0);
 	signal raw_active, raw_vbl, raw_color_mode, raw_color_line : std_logic;
 	signal seam_hcount : unsigned(10 downto 0);
-	signal seam_active, seam_vbl, seam_color_mode : std_logic;
-	signal current_active_q, filtered_active, line_valid_q, color_mode_q : std_logic;
+	signal seam_active, seam_timing_active, seam_vbl, seam_color_mode : std_logic;
+	signal current_active_q, current_timing_active_q, filtered_timing_active, line_valid_q, color_mode_q : std_logic;
+	signal timing_active_delay : std_logic_vector(0 to 13) := (others => '0');
 	signal seam_rgb_window : rgb_window_t := (others => (others => '0'));
 	signal seam_luma_window, seam_saturation_window : metric_window_t := (others => 0);
 	signal seam_hcount_window : hcount_window_t := (others => (others => '0'));
@@ -552,9 +553,9 @@ begin
 		next_color_mode(4) := raw_color_mode;
 		next_color_line(4) := raw_color_line;
 
-		-- Colorization now happens in the pixel generator; this stage is a
-		-- fixed two-dot delay so latency matches earlier builds.
-		output_rgb := next_rgb(2);
+		-- Colorization happens in the pixel generator, so use the newest RGB
+		-- sample while preserving the established active-window timing below.
+		output_rgb := next_rgb(4);
 
 		seam_rgb_window <= next_rgb;
 		seam_luma_window <= next_luma;
@@ -566,10 +567,12 @@ begin
 		seam_color_line_window <= next_color_line;
 
 		seam_rgb <= output_rgb;
-		seam_hcount <= next_hcount(2);
-		seam_active <= next_valid(2);
-		seam_vbl <= next_vbl(2);
-		seam_color_mode <= next_color_mode(2);
+		seam_hcount <= next_hcount(4);
+		seam_active <= next_valid(4);
+		timing_active_delay <= timing_active_delay(1 to 13) & next_valid(2);
+		seam_timing_active <= timing_active_delay(0);
+		seam_vbl <= next_vbl(4);
+		seam_color_mode <= next_color_mode(4);
 	end if;
 end process seam_cleanup;
 
@@ -578,6 +581,7 @@ begin
 	if rising_edge(CLK_14M) then
 		current_rgb_q <= seam_rgb;
 		current_active_q <= seam_active;
+		current_timing_active_q <= seam_timing_active;
 		line_valid_q <= previous_line_valid;
 		color_mode_q <= seam_color_mode;
 
@@ -611,7 +615,7 @@ process (CLK_14M)
 begin
 	if rising_edge(CLK_14M) then
 		output_rgb := current_rgb_q;
-		filtered_active <= current_active_q;
+		filtered_timing_active <= current_timing_active_q;
 		if NTSC_VERTICAL_COMB = '1' and current_active_q = '1' and
 			line_valid_q = '1' and color_mode_q = '1' then
 			current_luma := (306 * to_integer(current_rgb_q(23 downto 16)) +
@@ -642,6 +646,6 @@ VGA_G <= filtered_rgb(15 downto 8);
 VGA_B <= filtered_rgb(7 downto 0);
 
 VGA_VBL <= vbl_delayed;
-VGA_HBL <= not filtered_active;
+VGA_HBL <= not filtered_timing_active;
 
 end rtl;
