@@ -93,6 +93,7 @@ architecture rtl of vga_controller is
 	signal previous_line_rgb : rgb_line_ram_t;
 	signal previous_line_valid : std_logic := '0';
 	signal seam_active_d : std_logic := '0';
+	signal comb_hcount : unsigned(10 downto 0) := (others => '0');
 	signal line_wr_addr : unsigned(10 downto 0) := (others => '0');
 	signal line_wr_data : unsigned(23 downto 0) := (others => '0');
 	signal line_wr_en : std_logic := '0';
@@ -589,18 +590,19 @@ begin
 		-- the write of A; old-line data no longer depends on the RAM's
 		-- read-during-write mode (M10K cannot return old data on one port).
 		line_wr_en <= '0';
-		seam_active_d <= seam_active;
+		seam_active_d <= seam_timing_active;
 		if seam_vbl = '1' then
 			previous_line_valid <= '0';
-		elsif seam_active = '1' then
-			previous_rgb_q <= previous_line_rgb(to_integer(seam_hcount));
-			line_wr_addr <= seam_hcount;
+			comb_hcount <= (others => '0');
+		elsif seam_timing_active = '1' then
+			previous_rgb_q <= previous_line_rgb(to_integer(comb_hcount));
+			line_wr_addr <= comb_hcount;
 			line_wr_data <= seam_rgb;
 			line_wr_en <= '1';
+			comb_hcount <= comb_hcount + 1;
 		elsif seam_active_d = '1' then
-			-- Any completed active line validates the buffer; HBL can rise
-			-- before hcount reaches 559, so an exact terminal count never fires.
 			previous_line_valid <= '1';
+			comb_hcount <= (others => '0');
 		end if;
 		if line_wr_en = '1' then
 			previous_line_rgb(to_integer(line_wr_addr)) <= line_wr_data;
@@ -616,7 +618,7 @@ begin
 	if rising_edge(CLK_14M) then
 		output_rgb := current_rgb_q;
 		filtered_timing_active <= current_timing_active_q;
-		if NTSC_VERTICAL_COMB = '1' and current_active_q = '1' and
+		if NTSC_VERTICAL_COMB = '1' and current_timing_active_q = '1' and
 			line_valid_q = '1' and color_mode_q = '1' then
 			current_luma := (306 * to_integer(current_rgb_q(23 downto 16)) +
 				601 * to_integer(current_rgb_q(15 downto 8)) +
