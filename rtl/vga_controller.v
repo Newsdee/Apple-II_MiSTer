@@ -21,7 +21,6 @@ module vga_controller(
     input             SEAM_RUN_WIDE,
     input             RUN_FILL_OK,
     input             NTSC_VERTICAL_COMB,
-    input      [3:0]  HSHIFT,
     input             HBL,
     input             VBL,
     output reg        VGA_HS,
@@ -429,58 +428,6 @@ always @(posedge CLK_14M) begin: pixel_generator
     end
 end
 
-// ---------------------------------------------------------------------------
-// HSHIFT: shift rendered content right by N samples (0..15) relative to
-// HSYNC. All raw_* pipeline signals are delayed by N cycles before they enter
-// the seam window, so RGB data, the active-window strobe, seam decisions, and
-// the line-RAM writes all move together (color comb stays self-consistent).
-// HSHIFT=0 selects the undelayed signals directly: bit-identical to the
-// unshifted design.
-localparam integer HS_WIDTH = 41;
-wire [HS_WIDTH-1:0] hs_raw_in = {raw_rgb, raw_bit, raw_settled, raw_hcount,
-                                  raw_active, raw_vbl, raw_color_mode,
-                                  raw_color_line};
-// Stage i holds the input delayed by i+1 cycles, so HSHIFT=N reads stage
-// N-1 (N>=1); HSHIFT=0 bypasses the pipe entirely.
-reg [HS_WIDTH-1:0] hshift_pipe [0:14];
-
-always @(posedge CLK_14M) begin: hshift_delay
-    integer hs_i;
-    hshift_pipe[0] <= hs_raw_in;
-    for (hs_i = 1; hs_i < 15; hs_i = hs_i + 1)
-        hshift_pipe[hs_i] <= hshift_pipe[hs_i - 1];
-end
-
-reg [HS_WIDTH-1:0] hs_sel;
-always @(*) begin: hshift_mux
-    case (HSHIFT)
-        4'd0:   hs_sel = hs_raw_in;
-        4'd1:   hs_sel = hshift_pipe[0];
-        4'd2:   hs_sel = hshift_pipe[1];
-        4'd3:   hs_sel = hshift_pipe[2];
-        4'd4:   hs_sel = hshift_pipe[3];
-        4'd5:   hs_sel = hshift_pipe[4];
-        4'd6:   hs_sel = hshift_pipe[5];
-        4'd7:   hs_sel = hshift_pipe[6];
-        4'd8:   hs_sel = hshift_pipe[7];
-        4'd9:   hs_sel = hshift_pipe[8];
-        4'd10:  hs_sel = hshift_pipe[9];
-        4'd11:  hs_sel = hshift_pipe[10];
-        4'd12:  hs_sel = hshift_pipe[11];
-        4'd13:  hs_sel = hshift_pipe[12];
-        4'd14:  hs_sel = hshift_pipe[13];
-        default: hs_sel = hshift_pipe[14];
-    endcase
-end
-wire [23:0] hsel_rgb         = hs_sel[HS_WIDTH-1:HS_WIDTH-24];
-wire        hsel_bit         = hs_sel[HS_WIDTH-25];
-wire        hsel_settled     = hs_sel[HS_WIDTH-26];
-wire [10:0] hsel_hcount      = hs_sel[HS_WIDTH-27:HS_WIDTH-37];
-wire        hsel_active      = hs_sel[HS_WIDTH-38];
-wire        hsel_vbl         = hs_sel[HS_WIDTH-39];
-wire        hsel_color_mode  = hs_sel[HS_WIDTH-40];
-wire        hsel_color_line  = hs_sel[HS_WIDTH-41];
-
 // Preserve the VHDL seam-cleanup pipeline layout and active-window delay.
 integer seam_index;
 
@@ -516,6 +463,11 @@ integer seam_index;
 // SEAM_RUN_FILL/SEAM_RUN_WIDE asserted.
 wire run_fill_en = SEAM_RUN_FILL && RUN_FILL_OK;
 
+// TAD feed index, explicitly 4 bits: the 9-deep window needs 4 bits to
+// address all elements (a bare "? 5 : 7" sizes to 3 bits and trips Quartus
+// Warning 10027).
+wire [3:0] tad_feed_idx = (GRAY_SEAM_FIX && run_fill_en) ? 4'd5 : 4'd7;
+
 always @(posedge CLK_14M) begin: seam_cleanup
     integer c_luma;
     integer l_luma;
@@ -538,24 +490,24 @@ always @(posedge CLK_14M) begin: seam_cleanup
         seam_bit_window[seam_index] <= seam_bit_window[seam_index + 1];
         seam_settled_window[seam_index] <= seam_settled_window[seam_index + 1];
     end
-    seam_rgb_window[8] <= hsel_rgb;
-    seam_luma_window[8] <= rgb_luma(hsel_rgb);
-    seam_saturation_window[8] <= rgb_saturation(hsel_rgb);
-    seam_hcount_window[8] <= hsel_hcount;
-    seam_valid_window[8] <= hsel_active;
-    seam_vbl_window[8] <= hsel_vbl;
-    seam_color_mode_window[8] <= hsel_color_mode;
-    seam_color_line_window[8] <= hsel_color_line;
-    seam_bit_window[8] <= hsel_bit;
-    seam_settled_window[8] <= hsel_settled;
+    seam_rgb_window[8] <= raw_rgb;
+    seam_luma_window[8] <= rgb_luma(raw_rgb);
+    seam_saturation_window[8] <= rgb_saturation(raw_rgb);
+    seam_hcount_window[8] <= raw_hcount;
+    seam_valid_window[8] <= raw_active;
+    seam_vbl_window[8] <= raw_vbl;
+    seam_color_mode_window[8] <= raw_color_mode;
+    seam_color_line_window[8] <= raw_color_line;
+    seam_bit_window[8] <= raw_bit;
+    seam_settled_window[8] <= raw_settled;
 
     // TAD is fed from the sample the enabled path outputs (index 7 = raw-2,
     // or 5 = raw-4 with the run fill). GRAY_SEAM_FIX=0 always uses index 7
     // so the original strobe timing (TAD_13 = raw-16) is bit-identical.
     timing_active_delay <= {timing_active_delay[14:0],
-        seam_valid_window[(GRAY_SEAM_FIX && run_fill_en) ? 5 : 7]};
-    seam_vbl_d <= hsel_vbl;
-    seam_color_mode_d <= hsel_color_mode;
+        seam_valid_window[tad_feed_idx]};
+    seam_vbl_d <= raw_vbl;
+    seam_color_mode_d <= raw_color_mode;
     if (GRAY_SEAM_FIX) begin
         if (run_fill_en) begin
             // Center = window[5] (raw-4); left [4] (1) [3] (2) [2] (3)
@@ -777,7 +729,8 @@ always @(posedge CLK_14M) begin: seam_cleanup
                     end
                 end
             end
-            seam_rgb <= fill_ok ? fill_rgb : seam_rgb_window[5];
+            seam_rgb <= (seam_color_line_window[5] && fill_ok)
+                ? fill_rgb : seam_rgb_window[5];
             // Strobe keeps the same 16-sample lead as the other paths: the
             // run-fill feed (window[5] = raw-4) is 2 samples older than the
             // gray-fill feed (window[7] = raw-2), so the same absolute
@@ -843,7 +796,8 @@ always @(posedge CLK_14M) begin: seam_cleanup
                     end
                 end
             end
-            seam_rgb <= fill_ok ? fill_rgb : seam_rgb_window[7];
+            seam_rgb <= (seam_color_line_window[7] && fill_ok)
+                ? fill_rgb : seam_rgb_window[7];
             seam_timing_active <= timing_active_delay[15];
         end
         seam_vbl <= seam_vbl_d;
