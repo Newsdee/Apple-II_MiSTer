@@ -79,7 +79,7 @@ port (
   virtual_control : in std_logic;
   virtual_open_apple : in std_logic;
   virtual_closed_apple : in std_logic;
-	joy            : in  std_logic_vector(5 downto 0);
+	joy            : in  std_logic_vector(7 downto 0);
 	joy_an         : in  std_logic_vector(15 downto 0);
 	JOY_TO_KEY_EN  : in  std_logic;  -- OSD: joystick-to-keys enable (P3oB)
 
@@ -223,7 +223,7 @@ end component;
       clk            : in  std_logic;
       reset          : in  std_logic;
       enable         : in  std_logic;
-      joy            : in  std_logic_vector(5 downto 0);
+      joy            : in  std_logic_vector(7 downto 0);
       ioctl_download : in  std_logic;
       ioctl_wr       : in  std_logic;
       ioctl_addr     : in  std_logic_vector(24 downto 0);

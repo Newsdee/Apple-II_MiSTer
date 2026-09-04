@@ -83,6 +83,9 @@ parameter CONF_STR = {
 	"P1oA,Virtual keyboard,Off,On;",
 	"P1o89,Keypad visibility,100%,75%,50%,25%;",
 	"P1-;",
+	"P1oB,Joystick to keys,Off,On;",
+	"P1F3,A2K,Load Joy Map;",
+	"P1-;",
 	"P2,Audio & Video;",
 	"P2-;",	
 	"P2O78,Stereo mix,none,25%,50%,100%;",
@@ -105,15 +108,13 @@ parameter CONF_STR = {
 	"P3OHI,Paddle as analog,No,X,Y;",
 	"P3o46,Analog X center,0,-16,-32,-48,-64,-72,+32,+48;",
 	"P3o7,Joystick mode,Absolute,Relative;",
-	"P3oB,Joystick to keys,Off,On;",
-	"P3F3,JKM,Load Joy Map;",
 	"P3-;",	
 	"P3o3,Disk LED overlay,Yes,No;",
 	"P3o12,Disk drive sound,Off,On (1x),On (2x),On (4x);",
 	"P3-;",
 	"-;",
 	"R0,Cold Reset;",
-	"JA,Fire 1,Fire 2,Keyboard On,Keyb. visibility,Keyboard Enter,Keyboard Space;",
+	"JA,Fire 1,Fire 2,Keyboard On,Keyb. visibility,Move keyboard,Keyboard Enter,Keyboard Space;",
 	"jn,A|P,B;",
 	"jp,Y|P,B;",
 	"V,v",`BUILD_DATE
@@ -207,7 +208,7 @@ virtual_keyboard_controller virtual_keyboard_controller
 	.clk(clk_sys),
 	.reset(RESET | status[0]),
 	.ps2_key(ps2_key),
-	.joystick(joystick_0[9:0]),
+	.joystick(joystick_0[10:0]),
 	.enabled(virtual_keyboard_enabled),
 	.filtered_ps2_key(filtered_ps2_key),
 	.active(virtual_keyboard_active),
@@ -278,9 +279,9 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 ///////////////////////////////////////////////////
 
 wire [15:0] joya;
-wire  [5:0] joyd;
+wire  [7:0] joyd;
 wire [15:0] core_joya = virtual_keyboard_active ? 16'h0000 : joya;
-wire  [5:0] core_joyd = virtual_keyboard_active ? 6'h00 : joyd;
+wire  [7:0] core_joyd = virtual_keyboard_active ? 8'h00 : joyd;
 
 joystick_input joystick_input
 (
@@ -407,7 +408,10 @@ apple2_top apple2_top
 
 	.joy(core_joyd),
 	.joy_an(core_joya),
-	.JOY_TO_KEY_EN(status[43]),
+	// Joy-to-key is disabled while the virtual keyboard is enabled: the user is
+	// expected to type with the keyboard instead, so the joystick must not inject
+	// keystrokes at the same time. The raw joystick (gameport) is unaffected.
+	.JOY_TO_KEY_EN(status[43] && !virtual_keyboard_enabled),
 	
 	.TRACK1(TRACK1),
 	.TRACK1_ADDR(TRACK1_RAM_ADDR),
