@@ -160,8 +160,67 @@ port (
 end apple2_top;
 
 architecture arch of apple2_top is
-  component superserial is
+  component apple2 is
     port (
+      CLK_14M        : in  std_logic;
+      CLK_2M         : out std_logic;
+      PALMODE        : in  std_logic;
+      ROMSWITCH      : in  std_logic;
+      CPU_WAIT       : in  std_logic;
+      PHASE_ZERO     : out std_logic;
+      PHASE_ZERO_R   : out std_logic;
+      PHASE_ZERO_F   : out std_logic;
+      FLASH_CLK      : in  std_logic;
+      reset          : in  std_logic;
+      cpu            : in  std_logic;
+      STALL          : in  std_logic;
+      ADDR           : out unsigned(15 downto 0);
+      ram_addr       : out unsigned(17 downto 0);
+      D              : out unsigned(7 downto 0);
+      ram_do         : in  unsigned(15 downto 0);
+      aux            : out std_logic;
+      PD             : in  unsigned(7 downto 0);
+      CPU_WE         : out std_logic;
+      IRQ_n          : in  std_logic;
+      NMI_n          : in  std_logic;
+      ram_we         : out std_logic;
+      VIDEO          : out std_logic;
+      COLOR_LINE     : out std_logic;
+      RUN_FILL_OK    : out std_logic;
+      TEXT_MODE      : out std_logic;
+      HBL            : out std_logic;
+      VBL            : out std_logic;
+      K              : in  unsigned(7 downto 0);
+      READ_KEY       : out std_logic;
+      AKD            : in  std_logic;
+      AN             : out std_logic_vector(3 downto 0);
+      GAMEPORT       : in  std_logic_vector(7 downto 0);
+      PDL_STROBE     : out std_logic;
+      STB            : out std_logic;
+      IO_SELECT      : out std_logic_vector(7 downto 0);
+      DEVICE_SELECT  : out std_logic_vector(7 downto 0);
+      IO_STROBE      : out std_logic;
+      ioctl_addr     : in  std_logic_vector(24 downto 0);
+      ioctl_data     : in  std_logic_vector(7 downto 0);
+      ioctl_index    : in  std_logic_vector(7 downto 0);
+      ioctl_download : in  std_logic;
+      ioctl_wr       : in  std_logic;
+      saturn_5_inslot: in  std_logic;
+      speaker        : out std_logic;
+      DBG_T65_REGS   : out std_logic_vector(63 downto 0);
+      DBG_DI         : out std_logic_vector(7 downto 0);
+      DBG_ROM_ADDR   : out std_logic_vector(13 downto 0);
+      DBG_ROM_OUT    : out std_logic_vector(7 downto 0);
+      ss_addr        : in  std_logic_vector(9 downto 0);
+      ss_wdata       : in  std_logic_vector(63 downto 0);
+      ss_wren        : in  std_logic;
+      ss_rdata       : out std_logic_vector(63 downto 0);
+      machine_ce     : in  std_logic;
+      cpu_frozen     : out std_logic
+    );
+  end component;
+
+  component superserial is    port (
 	CLK_14M  	: in std_logic;
 	CLK_2M  	: in std_logic;
 	CLK_50M		: in std_logic;
@@ -257,6 +316,29 @@ end component;
       soft_reset:    out std_logic;
       video_toggle:  out std_logic;
       palette_toggle:out std_logic
+    );
+  end component;
+
+  component applemouse is
+    port (
+      CLK_14M       : in  std_logic;
+      CLK_2M        : in  std_logic;
+      PHASE_ZERO    : in  std_logic;
+      IO_SELECT     : in  std_logic;
+      IO_STROBE     : in  std_logic;
+      DEVICE_SELECT : in  std_logic;
+      RESET         : in  std_logic;
+      A             : in  unsigned(15 downto 0);
+      D_IN          : in  unsigned(7 downto 0);
+      D_OUT         : out unsigned(7 downto 0);
+      RNW           : in  std_logic;
+      OE            : out std_logic;
+      IRQ_N         : out std_logic;
+      STROBE        : in  std_logic;
+      X             : in  signed(8 downto 0);
+      Y             : in  signed(8 downto 0);
+      SCALE         : in  std_logic_vector(1 downto 0);
+      BUTTON        : in  std_logic
     );
   end component;
 
@@ -507,7 +589,7 @@ begin
         SSC_DO when IO_SELECT(2) = '1' or DEVICE_SELECT(2) = '1' or SSC_ROM_EN ='1' else 
         DISK_DO;
 
-  core : entity work.apple2 port map (
+  core : component apple2 port map (
     CLK_14M        => CLK_14M,
     CLK_2M         => CLK_2M,
     CPU_WAIT       => CPU_WAIT,
@@ -542,6 +624,7 @@ begin
     AN             => open,
     GAMEPORT       => GAMEPORT,
     PDL_strobe     => pdl_strobe,
+    STB            => open,
     IO_SELECT      => IO_SELECT,
     DEVICE_SELECT  => DEVICE_SELECT,
     IO_STROBE      => IO_STROBE,
@@ -554,7 +637,17 @@ begin
 	 
     saturn_5_inslot=> saturn_5_inslot,
 	 
-    speaker        => spk_bit
+    speaker        => spk_bit,
+    DBG_T65_REGS   => open,
+    DBG_DI         => open,
+    DBG_ROM_ADDR   => open,
+    DBG_ROM_OUT    => open,
+    ss_addr        => (others => '0'),
+    ss_wdata       => (others => '0'),
+    ss_wren        => '0',
+    ss_rdata       => open,
+    machine_ce     => '1',
+    cpu_frozen     => open
     );
 
   tv : component vga_controller port map (
@@ -762,7 +855,7 @@ begin
 	
 
 
- mouse_4 : entity work.applemouse 
+ mouse_4 : component applemouse
  port map (
     CLK_14M        => CLK_14M,
     CLK_2M         => CLK_2M,
@@ -781,9 +874,10 @@ begin
     STROBE         => mouse_strobe,
     X              => mouse_x,
     Y              => mouse_y,
+     SCALE          => "00",
     BUTTON         => mouse_button
   );
- mouse_5 : entity work.applemouse 
+   mouse_5 : component applemouse
  port map (
     CLK_14M        => CLK_14M,
     CLK_2M         => CLK_2M,
@@ -802,6 +896,7 @@ begin
     STROBE         => mouse_strobe,
     X              => mouse_x,
     Y              => mouse_y,
+    SCALE          => "00",
     BUTTON         => mouse_button
   );
 	

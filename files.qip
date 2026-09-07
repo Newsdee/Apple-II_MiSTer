@@ -14,10 +14,10 @@ set_global_assignment -name VERILOG_FILE rtl/ssc/uart_6551.v
 set_global_assignment -name VERILOG_FILE rtl/ssc/6551rx.v
 set_global_assignment -name VERILOG_FILE rtl/ssc/6551tx.v
 set_global_assignment -name VHDL_FILE rtl/ssc/ssc_rom.vhd
-set_global_assignment -name VHDL_FILE rtl/mouse/applemouse.vhd
-set_global_assignment -name VHDL_FILE rtl/mouse/pia6821.vhd
-set_global_assignment -name VHDL_FILE rtl/mouse/applemouse_rom.vhd
-set_global_assignment -name VHDL_FILE rtl/mouse/applemouse_mcu_rom.vhd
+set_global_assignment -name VERILOG_FILE rtl/mouse/applemouse.v
+set_global_assignment -name VERILOG_FILE rtl/mouse/pia6821.v
+set_global_assignment -name VERILOG_FILE rtl/mouse/applemouse_rom.v
+set_global_assignment -name VERILOG_FILE rtl/mouse/applemouse_mcu_rom.v
 set_global_assignment -name VERILOG_FILE rtl/mouse/jt6805/jt6805.v
 set_global_assignment -name VERILOG_FILE rtl/mouse/jt6805/jt6805_regs.v
 set_global_assignment -name VERILOG_FILE rtl/mouse/jt6805/jt6805_ctrl.v
@@ -42,6 +42,6 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/floppy_sound.sv
 set_global_assignment -name VERILOG_FILE rtl/timing_generator.v
 set_global_assignment -name VERILOG_FILE rtl/video_generator.v
 set_global_assignment -name VERILOG_FILE rtl/vga_controller.v
-set_global_assignment -name VHDL_FILE rtl/apple2.vhd
-set_global_assignment -name VHDL_FILE rtl/apple2_top.vhd
+set_global_assignment -name VERILOG_FILE rtl/apple2.v
+set_global_assignment -name VERILOG_FILE rtl/apple2_top.v
 set_global_assignment -name SYSTEMVERILOG_FILE "Apple-II.sv"

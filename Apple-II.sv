@@ -401,7 +401,7 @@ apple2_top apple2_top
 	.AUDIO_R(core_audio_r),
 	.TAPE_IN(tape_adc_act & tape_adc),
 
-	.ps2_key(filtered_ps2_key),
+	.PS2_Key(filtered_ps2_key),
 	.virtual_keyboard_active(virtual_keyboard_active),
 	.virtual_keyboard_event(virtual_keyboard_event),
 	.virtual_keyboard_pressed(virtual_keyboard_pressed),
