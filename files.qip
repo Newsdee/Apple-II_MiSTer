@@ -39,6 +39,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/osk/virtual_keyboard_controll
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/osk/virtual_keyboard_overlay.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/drive_status_overlay.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/floppy_sound.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate_manager_l1b.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate_ddr_l1b.sv
 set_global_assignment -name VERILOG_FILE rtl/timing_generator.v
 set_global_assignment -name VERILOG_FILE rtl/video_generator.v
 set_global_assignment -name VERILOG_FILE rtl/vga_controller.v

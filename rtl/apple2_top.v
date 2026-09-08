@@ -26,6 +26,12 @@ module apple2_top(
     cpu_type,
     CPU_WAIT,
     cpu_stall,
+    ss_addr,
+    ss_wdata,
+    ss_wren,
+    ss_rdata,
+    machine_ce,
+    cpu_frozen,
     ram_we,
     ram_di,
     ram_do,
@@ -129,6 +135,13 @@ module apple2_top(
     input         cpu_type;
     input         CPU_WAIT;
     input         cpu_stall; // 1: hold the CPU in place (OSD pause)
+
+    input  [9:0]  ss_addr;
+    input  [63:0] ss_wdata;
+    input         ss_wren;
+    output [63:0] ss_rdata;
+    input         machine_ce;
+    output        cpu_frozen;
 
     // main RAM
     output        ram_we;
@@ -304,6 +317,7 @@ module apple2_top(
     wire [9:0]    psg_5_audio_l;
     wire [9:0]    psg_5_audio_r;
     wire [9:0]    audio;
+    wire [63:0]   core_ss_rdata;
 
     // box-average the $C030 speaker bit at 14.318 MHz into
     // ~48 kHz samples (298 clocks = 20.8 us) so fast toggles average out
@@ -324,19 +338,28 @@ module apple2_top(
     // In the Apple ][, this was a 555 timer
     always @(posedge CLK_14M)
     begin: power_on
-        reset <= reset_warm | power_on_reset;
-
-        if (reset_cold == 1'b1 || soft_reset == 1'b1)
+        if (ss_wren && (ss_addr == 10'd8))
         begin
-            power_on_reset <= 1'b1;
-            flash_clk      <= {23{1'b0}};
+            flash_clk      <= ss_wdata[22:0];
+            power_on_reset <= ss_wdata[23];
+            reset          <= ss_wdata[24];
         end
-        else
+        else if (machine_ce)
         begin
-            if (flash_clk[22] == 1'b1)
-                power_on_reset <= 1'b0;
+            reset <= reset_warm | power_on_reset;
 
-            flash_clk <= flash_clk + 1;
+            if (reset_cold == 1'b1 || soft_reset == 1'b1)
+            begin
+                power_on_reset <= 1'b1;
+                flash_clk      <= {23{1'b0}};
+            end
+            else
+            begin
+                if (flash_clk[22] == 1'b1)
+                    power_on_reset <= 1'b0;
+
+                flash_clk <= flash_clk + 1;
+            end
         end
     end
 
@@ -452,13 +475,18 @@ module apple2_top(
         .DBG_DI(),
         .DBG_ROM_ADDR(),
         .DBG_ROM_OUT(),
-        .ss_addr(10'd0),
-        .ss_wdata(64'd0),
-        .ss_wren(1'b0),
-        .ss_rdata(),
-        .machine_ce(1'b1),
-        .cpu_frozen()
+        .ss_addr(ss_addr),
+        .ss_wdata(ss_wdata),
+        .ss_wren(ss_wren),
+        .ss_rdata(core_ss_rdata),
+        .machine_ce(machine_ce),
+        .cpu_frozen(cpu_frozen)
     );
+
+    assign ss_rdata = (ss_addr == 10'd8) ?
+                      {39'd0, reset, power_on_reset, flash_clk} :
+                      (ss_addr == 10'd9) ?
+                      {36'd0, spk_avg, spk_sum, spk_cnt} : core_ss_rdata;
 
     vga_controller tv(
         .CLK_14M(CLK_14M),
@@ -813,13 +841,19 @@ module apple2_top(
 `endif
 
     always @(posedge CLK_14M) begin
-        if (spk_cnt == 9'd297) begin
-            spk_cnt <= 9'd0;
-            spk_sum <= 9'd0;
-            spk_avg <= spk_div[9:0];
-        end else begin
-            spk_cnt <= spk_cnt + 9'd1;
-            if (spk_bit) spk_sum <= spk_sum + 9'd1;
+        if (ss_wren && (ss_addr == 10'd9)) begin
+            spk_cnt <= ss_wdata[8:0];
+            spk_sum <= ss_wdata[17:9];
+            spk_avg <= ss_wdata[27:18];
+        end else if (machine_ce) begin
+            if (spk_cnt == 9'd297) begin
+                spk_cnt <= 9'd0;
+                spk_sum <= 9'd0;
+                spk_avg <= spk_div[9:0];
+            end else begin
+                spk_cnt <= spk_cnt + 9'd1;
+                if (spk_bit) spk_sum <= spk_sum + 9'd1;
+            end
         end
     end
     assign audio = spk_avg;

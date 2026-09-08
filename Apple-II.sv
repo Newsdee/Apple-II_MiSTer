@@ -27,7 +27,6 @@ module emu
 assign USER_OUT = '1;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0;
  
 assign LED_USER  = led;
 assign LED_DISK  = 0;
@@ -36,7 +35,7 @@ assign BUTTONS   = 0;
 assign VGA_SCALER= 0;
 assign VGA_DISABLE = 0;
 assign VGA_F1    = 0;
-assign HDMI_FREEZE = 0;
+assign HDMI_FREEZE = ss_busy;
 assign HDMI_BLACKOUT = 0;
 
 wire [1:0] ar = status[13:12];
@@ -60,7 +59,7 @@ video_freak video_freak
 
 `include "build_id.v" 
 parameter CONF_STR = {
-	"Apple-II;UART19200:9600:4800:2400:1200:300;",
+	"Apple-II;SS3E000000:200000,UART19200:9600:4800:2400:1200:300;",
 	"-;",
 	"S0,NIBDSKDO PO ;",
 	"S2,NIBDSKDO PO ;",
@@ -186,6 +185,10 @@ wire  [7:0] ioctl_data;
 wire soft_reset;
 
 wire [10:0] filtered_ps2_key;
+reg  [10:0] core_ps2_key = 0;
+reg         filtered_ps2_key_toggle = 0;
+reg         save_request = 0;
+reg         load_request = 0;
 wire virtual_keyboard_active;
 wire virtual_keyboard_commands;
 wire [2:0] virtual_keyboard_row;
@@ -232,6 +235,26 @@ virtual_keyboard_controller virtual_keyboard_controller
 	.virtual_code(virtual_keyboard_code),
 	.command_reset(virtual_keyboard_reset)
 );
+
+always @(posedge clk_sys) begin
+	save_request <= 1'b0;
+	load_request <= 1'b0;
+
+	if (RESET | status[0]) begin
+		filtered_ps2_key_toggle <= filtered_ps2_key[10];
+		core_ps2_key <= 11'd0;
+	end else if (filtered_ps2_key_toggle != filtered_ps2_key[10]) begin
+		filtered_ps2_key_toggle <= filtered_ps2_key[10];
+		if (!filtered_ps2_key[8] && (filtered_ps2_key[7:0] == 8'h03)) begin
+			if (filtered_ps2_key[9]) load_request <= 1'b1;
+		end else if (!filtered_ps2_key[8] && (filtered_ps2_key[7:0] == 8'h0B)) begin
+			if (filtered_ps2_key[9]) save_request <= 1'b1;
+		end else begin
+			core_ps2_key[10] <= ~core_ps2_key[10];
+			core_ps2_key[9:0] <= filtered_ps2_key[9:0];
+		end
+	end
+end
 
 hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 (
@@ -332,6 +355,34 @@ wire [1:0] palette_mode;
 wire osd_pause = status[44] && OSD_STATUS;
 wire virtual_keyboard_enabled = status[42];
 wire [1:0] virtual_keyboard_visibility = status[41:40];
+wire current_cpu = ~status[5];
+wire active_cpu = ss_busy ? ss_locked_cpu : current_cpu;
+
+wire [9:0]  ss_addr;
+wire [63:0] ss_wdata;
+wire [63:0] ss_rdata;
+wire [63:0] top_ss_rdata;
+wire        ss_wren;
+wire        machine_ce;
+wire        cpu_frozen;
+wire        ss_busy;
+wire        ss_done;
+wire        ss_error;
+wire        ss_locked_cpu;
+
+wire        ram_ss_bank;
+wire [15:0] ram_ss_addr;
+wire        ram_ss_rd;
+wire        ram_ss_wr;
+wire [7:0]  ram_ss_wdata;
+wire [7:0]  ram_ss_rdata;
+
+wire [14:0] slot_addr;
+wire        slot_rd;
+wire        slot_wr;
+wire [63:0] slot_wdata;
+wire [63:0] slot_rdata;
+wire        slot_ready;
 wire [1:0] virtual_keyboard_transparency_req = virtual_keyboard_visibility + 1'd1;
 reg [1:0] screen_mode_req;
 reg [1:0] palette_req;
@@ -371,8 +422,15 @@ apple2_top apple2_top
 	.CLK_50M(CLK_50M),
 
 	.CPU_WAIT(cpu_wait_hdd /*| cpu_wait_fdd*/),
-	.cpu_type(~status[5]),
-	.cpu_stall(osd_pause),
+	.cpu_type(active_cpu),
+	.cpu_stall(osd_pause | ss_busy),
+
+	.ss_addr(ss_addr),
+	.ss_wdata(ss_wdata),
+	.ss_wren(ss_wren),
+	.ss_rdata(top_ss_rdata),
+	.machine_ce(machine_ce),
+	.cpu_frozen(cpu_frozen),
 
 	.reset_cold(RESET | status[0]),
 	.reset_warm(buttons[1] | virtual_keyboard_reset),
@@ -401,7 +459,7 @@ apple2_top apple2_top
 	.AUDIO_R(core_audio_r),
 	.TAPE_IN(tape_adc_act & tape_adc),
 
-	.PS2_Key(filtered_ps2_key),
+	.PS2_Key(core_ps2_key),
 	.virtual_keyboard_active(virtual_keyboard_active),
 	.virtual_keyboard_event(virtual_keyboard_event),
 	.virtual_keyboard_pressed(virtual_keyboard_pressed),
@@ -594,27 +652,77 @@ wire  [7:0]	ram_din;
 wire        ram_we;
 wire        ram_aux;
 
-reg [7:0] ram0[196608];
-always @(posedge clk_sys) begin
-	if(ram_we & ~ram_aux) begin
-		ram0[ram_addr] <= ram_din;
-		ram_dout[7:0]  <= ram_din;
-	end else begin
-		ram_dout[7:0]  <= ram0[ram_addr];
-	end
-end
-
-reg [7:0] ram1[65536];
-always @(posedge clk_sys) begin
-	if(ram_we & ram_aux) begin
-		ram1[ram_addr[15:0]] <= ram_din;
-		ram_dout[15:8] <= ram_din;
-	end else begin
-		ram_dout[15:8] <= ram1[ram_addr[15:0]];
-	end
-end
-
 wire dd_reset = RESET | status[0] | buttons[1] | virtual_keyboard_reset | soft_reset;
+wire ram_main_select = ram_addr[17:16] == 2'b00;
+wire ram_machine_write = ram_we && !ss_busy;
+wire [7:0] main_ram_q_a;
+wire [7:0] main_ram_q_b;
+wire [7:0] aux_ram_q_a;
+wire [7:0] aux_ram_q_b;
+wire [7:0] saturn_ram_q_a;
+
+dpram #(16, 8) main_ram (
+	.address_a(ram_addr[15:0]), .address_b(ram_ss_addr),
+	.clock_a(clk_sys), .clock_b(clk_sys),
+	.data_a(ram_din), .data_b(ram_ss_wdata),
+	.enable_a(1'b1), .enable_b(1'b1),
+	.wren_a(ram_machine_write && !ram_aux && ram_main_select),
+	.wren_b(ram_ss_wr && !ram_ss_bank && !dd_reset),
+	.q_a(main_ram_q_a), .q_b(main_ram_q_b)
+);
+
+dpram #(16, 8) aux_ram (
+	.address_a(ram_addr[15:0]), .address_b(ram_ss_addr),
+	.clock_a(clk_sys), .clock_b(clk_sys),
+	.data_a(ram_din), .data_b(ram_ss_wdata),
+	.enable_a(1'b1), .enable_b(1'b1),
+	.wren_a(ram_machine_write && ram_aux),
+	.wren_b(ram_ss_wr && ram_ss_bank && !dd_reset),
+	.q_a(aux_ram_q_a), .q_b(aux_ram_q_b)
+);
+
+dpram #(17, 8) saturn_ram (
+	.address_a(ram_addr[16:0]), .address_b(17'd0),
+	.clock_a(clk_sys), .clock_b(clk_sys),
+	.data_a(ram_din), .data_b(8'd0),
+	.enable_a(1'b1), .enable_b(1'b0),
+	.wren_a(ram_machine_write && !ram_aux && !ram_main_select),
+	.wren_b(1'b0),
+	.q_a(saturn_ram_q_a), .q_b()
+);
+
+always @(posedge clk_sys) begin
+	ram_dout[7:0] <= ram_main_select ? main_ram_q_a : saturn_ram_q_a;
+	ram_dout[15:8] <= aux_ram_q_a;
+end
+
+assign ram_ss_rdata = ram_ss_bank ? aux_ram_q_b : main_ram_q_b;
+assign ss_rdata = (ss_addr == 10'd10) ? {63'd0, active_cpu} : top_ss_rdata;
+
+savestate_manager_l1b state_manager (
+	.clk(clk_sys), .reset(dd_reset),
+	.request_save(save_request), .request_load(load_request),
+	.allow_save_state(!saturn_5_inslot),
+	.cpu_type(current_cpu), .cpu_frozen(cpu_frozen),
+	.stall(), .machine_ce(machine_ce), .busy(ss_busy), .done(ss_done),
+	.error(ss_error), .locked_cpu_type(ss_locked_cpu),
+	.ss_addr(ss_addr), .ss_wdata(ss_wdata), .ss_wren(ss_wren), .ss_rdata(ss_rdata),
+	.ram_bank(ram_ss_bank), .ram_addr(ram_ss_addr), .ram_rd(ram_ss_rd),
+	.ram_wr(ram_ss_wr), .ram_wdata(ram_ss_wdata), .ram_rdata(ram_ss_rdata),
+	.slot_addr(slot_addr), .slot_rd(slot_rd), .slot_wr(slot_wr),
+	.slot_wdata(slot_wdata), .slot_rdata(slot_rdata), .slot_ready(slot_ready)
+);
+
+savestate_ddr_l1b #(.BASE_ADDR(29'h07C00000)) ddr_ss (
+	.clk(clk_sys), .reset(dd_reset),
+	.slot_addr(slot_addr), .slot_rd(slot_rd), .slot_wr(slot_wr),
+	.slot_wdata(slot_wdata), .slot_rdata(slot_rdata), .slot_ready(slot_ready),
+	.ddram_clk(DDRAM_CLK), .ddram_busy(DDRAM_BUSY),
+	.ddram_burstcnt(DDRAM_BURSTCNT), .ddram_addr(DDRAM_ADDR),
+	.ddram_dout(DDRAM_DOUT), .ddram_dout_ready(DDRAM_DOUT_READY),
+	.ddram_rd(DDRAM_RD), .ddram_din(DDRAM_DIN), .ddram_be(DDRAM_BE),
+	.ddram_we(DDRAM_WE)
+);
 
 reg  hdd_mounted = 0;
 wire hdd_read;
