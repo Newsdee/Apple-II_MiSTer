@@ -186,7 +186,7 @@ module apple2_top(
     input         virtual_control;
     input         virtual_open_apple;
     input         virtual_closed_apple;
-    input  [7:0]  joy;
+    input  [15:0] joy;
     input  [15:0] joy_an;
     input         JOY_TO_KEY_EN;
 
@@ -530,6 +530,9 @@ module apple2_top(
         .reset(reset_cold),
         .enable(JOY_TO_KEY_EN),
         .joy(joy),
+        // Select is bus bit 7; `joy` is already zeroed by the wrapper while
+        // the OSK is up, so shift is naturally 0 then (Select = OSK opacity).
+        .shift(joy[7]),
         .ioctl_download(ioctl_download),
         .ioctl_wr(ioctl_wr),
         .ioctl_addr(ioctl_addr),

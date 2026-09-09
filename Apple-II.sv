@@ -115,8 +115,11 @@ parameter CONF_STR = {
 	"P4-;",
 	"-;",
 	"R0,Cold Reset;",
-	"JA,Fire 1,Fire 2,Keyboard On,Keyb. visibility,Move keyboard,Keyboard Enter,Keyboard Space;",
-	"jn,A|P,B;",
+	// Gamepad layout (ABXYLR + Start/Select), one slot per hps_io bus bit.
+	// jn names map to bus bits 4-11 (D-pad is auto on bits 0-3): verify the
+	// exact bit positions on hardware (see WOZ_MERGE.md / joy-to-key notes).
+	"JA,Btn1|A,Btn2|B,Start,Select,L,R,X,Y;",
+	"jn,Btn1|A,Btn2|B,Start,Select,L,R,X,Y;",
 	"jp,Y|P,B;",
 	"V,v",`BUILD_DATE
 };
@@ -294,7 +297,10 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 wire [15:0] joya;
 wire  [7:0] joyd;
 wire [15:0] core_joya = virtual_keyboard_active ? 16'h0000 : joya;
-wire  [7:0] core_joyd = virtual_keyboard_active ? 8'h00 : joyd;
+// 16-bit digital bus for joy-to-key: low 8 = joyd (axis-masked, unchanged),
+// high 8 = raw hps_io bits 8-15 (the A/B/X/Y/L/R key buttons). Zeroed while
+// the OSK is up so its button presses don't double-trigger joy-to-key.
+wire [15:0] core_joyd = virtual_keyboard_active ? 16'h0000 : {joystick_0[15:8], joyd};
 
 joystick_input joystick_input
 (
@@ -341,7 +347,23 @@ reg       palette_toggle = 0;
 wire [1:0] screen_mode;
 wire [1:0] palette_mode;
 wire osd_pause = status[44] && OSD_STATUS;
-wire virtual_keyboard_enabled = status[42];
+// --- Optional: Start (gamepad bus bit 6) toggles the virtual keyboard ---
+// Clearly-marked NEW block for review. A Start down-edge flips vk_toggle;
+// the OSK enable is the OSD option (status[42]) XOR this latch, so Start
+// toggles relative to the OSD default. NOTE: the VK controller also uses
+// bus bit 6 as its "visibility" function while the OSK is up; if that
+// double-action is undesirable, gate the edge with !virtual_keyboard_active.
+reg        vk_toggle;
+reg        start_d;
+always @(posedge clk_sys) begin
+    start_d <= joystick_0[6];
+end
+wire start_edge = joystick_0[6] && !start_d;
+always @(posedge clk_sys) begin
+    if (RESET | status[0])   vk_toggle <= 1'b0;
+    else if (start_edge)     vk_toggle <= ~vk_toggle;
+end
+wire virtual_keyboard_enabled = status[42] ^ vk_toggle;
 wire [1:0] virtual_keyboard_visibility = status[41:40];
 wire current_cpu = ~status[5];
 wire active_cpu = ss_busy ? ss_locked_cpu : current_cpu;
