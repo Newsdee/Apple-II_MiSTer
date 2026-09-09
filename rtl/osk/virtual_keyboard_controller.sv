@@ -87,6 +87,8 @@ reg [2:0] command = CMD_NONE;
 reg [6:0] joystick_buttons_d = 0;
 reg [2:0] virtual_key_source = SOURCE_NONE;
 reg enabled_d = 0;
+reg [2:0] saved_row = 1;
+reg [3:0] saved_col = 1;
 reg physical_left_shift = 0;
 reg physical_right_shift = 0;
 reg physical_control = 0;
@@ -334,6 +336,12 @@ task automatic close_overlay;
 	begin
 		if(virtual_key_source == SOURCE_SELECT || virtual_key_source == SOURCE_BACK)
 			release_virtual_key();
+		// Remember the cursor position (main page only) so reopening resumes
+		// where the user left off instead of snapping back to the top-left key.
+		if(!commands_page) begin
+			saved_row <= selected_row;
+			saved_col <= selected_col;
+		end
 		active <= 0;
 		commands_page <= 0;
 		shift_latched <= 0;
@@ -347,8 +355,8 @@ task automatic open_overlay;
 	begin
 		active <= 1;
 		commands_page <= 0;
-		selected_row <= 1;
-		selected_col <= 1;
+		selected_row <= saved_row;
+		selected_col <= saved_col;
 		shift_latched <= 0;
 		control_latched <= 0;
 		open_apple <= 0;
@@ -415,6 +423,8 @@ always @(posedge clk) begin
 		commands_page <= 0;
 		selected_row <= 1;
 		selected_col <= 1;
+		saved_row  <= 1;
+		saved_col  <= 1;
 		shift_latched <= 0;
 		control_latched <= 0;
 		caps_latched <= 1;

@@ -135,6 +135,10 @@ module joy_to_key (
         for (b = 11; b >= 0; b = b - 1) begin
             if (MAPPABLE[b[3:0]] && down_edge[b[3:0]]) begin
                 bi = byte_index(b[3:0], shift);
+                // If Shift is held but the shifted byte is blank, fall back to
+                // the unshifted mapping so the button still does something.
+                if (shift && joy_map[bi] == 8'h00)
+                    bi = byte_index(b[3:0], 1'b0);
                 if (joy_map[bi] != 8'h00) begin
                     press_byte  = bi;
                     press_valid = 1'b1;

@@ -348,23 +348,12 @@ reg       palette_toggle = 0;
 wire [1:0] screen_mode;
 wire [1:0] palette_mode;
 wire osd_pause = status[44] && OSD_STATUS;
-// --- Optional: Start (gamepad bus bit 6) toggles the virtual keyboard ---
-// Clearly-marked NEW block for review. A Start down-edge flips vk_toggle;
-// the OSK enable is the OSD option (status[42]) XOR this latch, so Start
-// toggles relative to the OSD default. NOTE: the VK controller also uses
-// bus bit 6 as its "visibility" function while the OSK is up; if that
-// double-action is undesirable, gate the edge with !virtual_keyboard_active.
-reg        vk_toggle;
-reg        start_d;
-always @(posedge clk_sys) begin
-    start_d <= joystick_0[6];
-end
-wire start_edge = joystick_0[6] && !start_d;
-always @(posedge clk_sys) begin
-    if (RESET | status[0])   vk_toggle <= 1'b0;
-    else if (start_edge)     vk_toggle <= ~vk_toggle;
-end
-wire virtual_keyboard_enabled = status[42] ^ vk_toggle;
+// Start (gamepad bus bit 6) shows/hides the virtual keyboard. This is handled
+// by the VK controller's own visibility function: bit 6 down-edge drives
+// enabled_toggle, which toggles status[42] via the hps_io status_set path
+// (see status_in above). No separate latch here -- a second toggle on the
+// same bit would cancel the controller's and leave the keyboard stuck.
+wire virtual_keyboard_enabled = status[42];
 wire [1:0] virtual_keyboard_visibility = status[41:40];
 wire current_cpu = ~status[5];
 wire active_cpu = ss_busy ? ss_locked_cpu : current_cpu;
