@@ -185,10 +185,9 @@ wire  [7:0] ioctl_data;
 wire soft_reset;
 
 wire [10:0] filtered_ps2_key;
-reg  [10:0] core_ps2_key = 0;
-reg         filtered_ps2_key_toggle = 0;
-reg         save_request = 0;
-reg         load_request = 0;
+wire [10:0] core_ps2_key;
+wire        save_request;
+wire        load_request;
 wire virtual_keyboard_active;
 wire virtual_keyboard_commands;
 wire [2:0] virtual_keyboard_row;
@@ -236,25 +235,14 @@ virtual_keyboard_controller virtual_keyboard_controller
 	.command_reset(virtual_keyboard_reset)
 );
 
-always @(posedge clk_sys) begin
-	save_request <= 1'b0;
-	load_request <= 1'b0;
-
-	if (RESET | status[0]) begin
-		filtered_ps2_key_toggle <= filtered_ps2_key[10];
-		core_ps2_key <= 11'd0;
-	end else if (filtered_ps2_key_toggle != filtered_ps2_key[10]) begin
-		filtered_ps2_key_toggle <= filtered_ps2_key[10];
-		if (!filtered_ps2_key[8] && (filtered_ps2_key[7:0] == 8'h03)) begin
-			if (filtered_ps2_key[9]) load_request <= 1'b1;
-		end else if (!filtered_ps2_key[8] && (filtered_ps2_key[7:0] == 8'h0B)) begin
-			if (filtered_ps2_key[9]) save_request <= 1'b1;
-		end else begin
-			core_ps2_key[10] <= ~core_ps2_key[10];
-			core_ps2_key[9:0] <= filtered_ps2_key[9:0];
-		end
-	end
-end
+savestate_hotkeys savestate_hotkeys (
+	.clk(clk_sys),
+	.reset(RESET | status[0]),
+	.filtered_ps2_key(filtered_ps2_key),
+	.core_ps2_key(core_ps2_key),
+	.save_request(save_request),
+	.load_request(load_request)
+);
 
 hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 (
