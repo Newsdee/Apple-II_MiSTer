@@ -32,7 +32,7 @@ port (
 	soft_reset     : buffer std_logic;
 	cpu_type       : in std_logic;
 	CPU_WAIT       : in std_logic;
-	cpu_stall      : in std_logic;
+  cpu_pause      : in std_logic;
 
 	-- main RAM
 	ram_we         : out std_logic;
@@ -148,6 +148,8 @@ port (
 	mouse_x      : in signed(8 downto 0);
 	mouse_y      : in signed(8 downto 0);
 	mouse_button  : in std_logic;
+  mouse_scale   : in unsigned(1 downto 0);
+  mouse_rate    : in unsigned(1 downto 0);
 	
 	
 	mouse_4_inslot  : in std_logic;
@@ -296,6 +298,30 @@ end component;
       TRACK2_DO      : in  unsigned(7 downto 0);
       TRACK2_WE      : out std_logic;
       TRACK2_BUSY    : in  std_logic
+    );
+  end component;
+
+  component applemouse is
+    port (
+      CLK_14M       : in  std_logic;
+      CLK_2M        : in  std_logic;
+      PHASE_ZERO    : in  std_logic;
+      IO_SELECT     : in  std_logic;
+      IO_STROBE     : in  std_logic;
+      DEVICE_SELECT : in  std_logic;
+      RESET         : in  std_logic;
+      A             : in  unsigned(15 downto 0);
+      D_IN          : in  unsigned(7 downto 0);
+      D_OUT         : out unsigned(7 downto 0);
+      RNW           : in  std_logic;
+      OE            : out std_logic;
+      IRQ_N         : out std_logic;
+      STROBE        : in  std_logic;
+      X             : in  signed(8 downto 0);
+      Y             : in  signed(8 downto 0);
+      SCALE         : in  unsigned(1 downto 0);
+      RATE          : in  unsigned(1 downto 0);
+      BUTTON        : in  std_logic
     );
   end component;
 
@@ -517,7 +543,7 @@ begin
     FLASH_CLK      => flash_clk(22),
     reset          => reset,
     cpu            => cpu_type,
-    STALL          => cpu_stall,
+    CPU_PAUSE      => cpu_pause,
     ADDR           => ADDR,
     ram_addr       => a_ram,
     D              => D,
@@ -762,7 +788,7 @@ begin
 	
 
 
- mouse_4 : entity work.applemouse 
+ mouse_4 : component applemouse
  port map (
     CLK_14M        => CLK_14M,
     CLK_2M         => CLK_2M,
@@ -781,9 +807,11 @@ begin
     STROBE         => mouse_strobe,
     X              => mouse_x,
     Y              => mouse_y,
+    SCALE          => mouse_scale,
+    RATE           => mouse_rate,
     BUTTON         => mouse_button
   );
- mouse_5 : entity work.applemouse 
+ mouse_5 : component applemouse
  port map (
     CLK_14M        => CLK_14M,
     CLK_2M         => CLK_2M,
@@ -802,6 +830,8 @@ begin
     STROBE         => mouse_strobe,
     X              => mouse_x,
     Y              => mouse_y,
+    SCALE          => mouse_scale,
+    RATE           => mouse_rate,
     BUTTON         => mouse_button
   );
 	

@@ -99,6 +99,8 @@ parameter CONF_STR = {
 	"P3-;",	
 	"P3OST,Slot 4,Mocking board,Mouse,Empty;",
 	"P3OUV,Slot 5,Mouse,Mocking board,256K Saturn,Empty;",
+	"P3oDE,Mouse scaling,8x,16x,32x,64x;",
+	"P3oFG,Mouse rate,1x,2x,3x,3.5x;",
 	"P3O6,Analog X/Y,Normal,Swapped;",
 	"P3OHI,Paddle as analog,No,X,Y;",
 	"P3o46,Analog X center,0,-16,-32,-48,-64,-72,+32,+48;",
@@ -373,7 +375,7 @@ apple2_top apple2_top
 
 	.CPU_WAIT(cpu_wait_hdd /*| cpu_wait_fdd*/),
 	.cpu_type(~status[5]),
-	.cpu_stall(osd_pause),
+	.cpu_pause(osd_pause),
 
 	.reset_cold(RESET | status[0]),
 	.reset_warm(buttons[1] | virtual_keyboard_reset),
@@ -483,6 +485,8 @@ apple2_top apple2_top
 	.mouse_y(virtual_keyboard_active ? 9'sd0 : {ps2_mouse[5],ps2_mouse[23:16]}),
 	.mouse_button(virtual_keyboard_active ? 1'b0 : ps2_mouse[0]),
 	.mouse_strobe(virtual_keyboard_active ? 1'b0 : mouse_strobe),
+	.mouse_scale(status[46:45]),
+	.mouse_rate(status[48:47]),
 
 	.mouse_4_inslot(mouse_4_inslot),
 	.mouse_5_inslot(mouse_5_inslot),
@@ -704,8 +708,9 @@ wire TRACK2_RAM_WE;
 wire [5:0] TRACK2;
 
 wire [1:0] DISK_READY;
-reg [1:0] DISK_CHANGE;
-reg [1:0]disk_mount;
+// Deterministic power-on state (v6 media-change lockdown).
+reg [1:0] DISK_CHANGE = 'b00;
+reg [1:0]disk_mount = 'b00;
 
 
 

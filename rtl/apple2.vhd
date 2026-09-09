@@ -25,7 +25,7 @@ entity apple2 is
     FLASH_CLK      : in  std_logic;        -- approx. 2 Hz flashing char clock
     reset          : in  std_logic;
     cpu            : in  std_logic;              -- 0 - 6502, 1 - 65C02
-    STALL          : in  std_logic;              -- 1: hold the CPU in place (OSD pause)
+    CPU_PAUSE      : in  std_logic;              -- 1: suppress CPU clock-enable pulses
     ADDR           : out unsigned(15 downto 0);  -- CPU address
     ram_addr       : out unsigned(17 downto 0);  -- RAM address
     D              : out unsigned(7 downto 0);   -- Data to RAM
@@ -141,6 +141,7 @@ architecture rtl of apple2 is
   signal Q3, RAS_N, CAS_N, AX : std_logic;
 
   signal CPU_EN : std_logic;
+  signal CPU_CE : std_logic;
   signal PHASE_ZERO_D : std_logic;
 
   -- From the timing generator
@@ -664,6 +665,7 @@ begin
   D_OUT <= unsigned(N6502_DO) when cpu = '0' else unsigned(N65C02_DO);
   --CPU_EN <= PHASE_ZERO_F; -- not sure why this isn't working??
   CPU_EN <= '1' when PHASE_ZERO_D = '1' and PHASE_ZERO = '0' else '0';
+  CPU_CE <= CPU_EN and not CPU_PAUSE;
   cpu_enable: process (CLK_14M)
   begin
     if rising_edge(CLK_14M) then
@@ -675,7 +677,7 @@ begin
 
 
   -- NMOS 6502: nmos6502 core (WDC_MODE=0, one bus access per cycle).
-  --   ce = CPU_EN, rdy = ~CPU_WAIT - the same edge model as the wdc65c02 core
+  --   ce = CPU_CE, rdy = ~CPU_WAIT - the same edge model as the wdc65c02 core
   --        below, so machine RAM/ROM timing is unchanged (WAIT now arrives on
   --        rdy instead of being ANDed into the old T65 enable).
   --   so_n high (no Set Overflow pin on the Apple II); be=1 (always drive);
@@ -688,10 +690,10 @@ begin
     )
     port map (
       clk         => CLK_14M,
-      ce          => CPU_EN,
+      ce          => CPU_CE,
       ce_n        => '0',
       reset       => reset,
-      stall       => STALL,
+      stall       => '0',
       irq_n       => IRQ_N,
       nmi_n       => NMI_N,
       rdy         => not CPU_WAIT,
@@ -720,7 +722,8 @@ begin
     );
 
   -- 65C02: wdc65c02 core (W65C02S-style, one bus access per cycle).
-  --   ce = CPU_EN: the PHASE_ZERO falling-edge pulse; on it the core samples
+  --   ce = CPU_CE: the PHASE_ZERO falling-edge pulse, suppressed while paused;
+  --        on it the core samples
   --        din and launches the next cycle's address/write - the exact edge
   --        R65C02's enable used, so machine RAM/ROM timing is unchanged.
   --   SoC-specific outputs and the savestate bus are tied off.
@@ -730,10 +733,10 @@ begin
     )
     port map (
       clk         => CLK_14M,
-      ce          => CPU_EN,
+      ce          => CPU_CE,
       ce_n        => '0',
       reset       => reset,
-      stall       => STALL,
+      stall       => '0',
       irq_n       => IRQ_N,
       nmi_n       => NMI_N,
       rdy         => not CPU_WAIT,

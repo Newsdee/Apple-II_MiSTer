@@ -1,5 +1,6 @@
 //
 // Apple ][ drive status overlay for MiSTer FPGA
+// Copyright (c) 2026 Newsdee
 //
 // Based on the work of
 // Copyright (c) 2016 Sorgelig
