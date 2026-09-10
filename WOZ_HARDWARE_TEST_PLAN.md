@@ -36,7 +36,7 @@ Known current drift to resolve:
 - Verify `rtl/apple2_top_woz.v` still matches `rtl/apple2_top.v` for save-state ports and words 8/9, `machine_ce`, `cpu_frozen`, CPU selection, speaker averaging, and all non-disk logic.
 - Confirm both variants use the shared current `rtl/video_generator.v`; ROM contents and registered ROM output must not be restored by save state.
 
-Do not blindly overwrite either WOZ variant. Compare first, reapply only shared changes, and retain the documented WOZ ports, 60 Hz IRQ, drive activity, media-channel wiring, and disabled floppy-sound behavior.
+Do not blindly overwrite either WOZ variant. Compare first, reapply only shared changes, and retain the documented WOZ ports, drive activity, media-channel wiring, and disabled floppy-sound behavior. (The 60 Hz IRQ is no longer part of the variant - removed 2026-09-10 as a hardware-verified video fix.)
 
 ## Phase 3: Pre-Compile Checks
 
@@ -69,7 +69,7 @@ After the toggle:
 
 Test with disposable writable images where writes are involved.
 
-1. Cold boot a known DOS 3.3 WOZ image in Drive 1. The boot must pass the one-second wait that depends on the WOZ variant's 60 Hz IRQ.
+1. Cold boot a known DOS 3.3 WOZ image in Drive 1. *Known to hang as of 2026-09-10*: the 60 Hz IRQ that satisfied the one-second wait was removed (hardware-verified video fix - the VBL-locked pulse corrupted the screen), and the core does not model the 60 Hz heartbeat. Until the heartbeat rework, do the video/media checks from HDV software; the floppy-boot step is blocked on the heartbeat follow-up (CLEANUP_TODO.md).
 2. Confirm Drive 1 reads and that its LED distinguishes motor-active from host transfer activity as documented.
 3. Write a file, reboot or remount, and verify persistence when the image is writable.
 4. Enable Drive 1 write protection and prove the same write is blocked.

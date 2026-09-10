@@ -449,10 +449,13 @@ module apple2_top(
                 DISK_DO;
 
     // 60 Hz IRQ (level_2/level_2b pattern): one short pulse per VBL
-    // rising edge, in the 14 MHz domain.  The ROM's 60 Hz handler keeps
-    // the OS 1-second counter that the DOS 3.3 boot path waits on;
-    // without it the boot hangs.  (The Disk II variant of this top does
-    // not generate it - pre-existing main-project behavior.)
+    // rising edge, in the 14 MHz domain.  DEAD as of 2026-09-10:
+    // irq_60hz_pulse no longer drives IRQ_n (removed - the VBL-locked
+    // pulse corrupted video: part of the screen missing, hardware-
+    // verified 2026-09-10; see the IRQ_n port comment below).  Kept
+    // for reference; trimmed in synthesis.  A properly-timed 60 Hz
+    // heartbeat (needed for the DOS 3.3 boot one-second wait) is an
+    // open follow-up (CLEANUP_TODO.md).
     reg  [4:0] irq_60hz_cnt;
     reg        vbl_irq_d;
     wire       irq_60hz_pulse = (irq_60hz_cnt != 5'd0);
@@ -484,7 +487,7 @@ module apple2_top(
         .aux(ram_aux),
         .PD(PD),
         .CPU_WE(cpu_we),
-        .IRQ_n(psg_4_irq_n & psg_5_irq_n & ssc_irq_n & mouse_4_irq_n & mouse_5_irq_n & ~irq_60hz_pulse),
+        .IRQ_n(psg_4_irq_n & psg_5_irq_n & ssc_irq_n & mouse_4_irq_n & mouse_5_irq_n),  // 60Hz pulse REMOVED (2026-09-10, hardware-verified): the VBL-locked pulse corrupted the video (part of screen missing). Was "... & ~irq_60hz_pulse".
         .NMI_n(psg_4_nmi_n & psg_5_nmi_n),
         .ram_we(we_ram),
         .VIDEO(VIDEO),
