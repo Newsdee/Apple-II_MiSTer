@@ -57,10 +57,61 @@ active project file lists, so they are left untouched.
       instance. Verilator parse: no syntax errors.
 
   **Integration complete for the Woz build.** M5 = verification.
+- [x] **M5** — verification (Verilator). See below.
+
+## Verification (M5)
+
+`tools/tb_video_pipeline_regress.sv` (Verilator-only, NOT a Quartus source;
+not in `files.qip`/`Apple-II.qsf`). Differential test with a synthetic 14 MHz
+NTSC-ish signal (912-cycle line, 352 HBL + 560 active, 3-line VBL, 262-line
+field):
+
+1. **Regress** — `video_pipeline(use_composite=0)` vs a bare `vga_controller`,
+   same inputs, every active-field sample compared for 4 fields:
+   **708,624 samples, 0 mismatches → PASS.** The existing VGA path is
+   byte-identical (no regression).
+2. **Composite sanity** — flip `use_composite=1`, 4 fields:
+   **Rmin=0 Rmax=255, 328,412 non-zero → PASS.** The encode→decode wiring
+   (sync derivation + burst + loopback decoder) is alive and produces
+   full-range contrast.
+
+Run command (MSYS2 ucrt64; build+run in one command to beat the AV grace
+window on the freshly-linked PE):
+
+```sh
+cd /e/MiSTer/Apple-II_FPGAdev/Apple-II_MiSTer_newsdee
+export VERILATOR_ROOT=/c/msys64/ucrt64/share/verilator
+export PATH="/c/msys64/tmp/makeshim:/c/msys64/ucrt64/bin:$PATH"
+mkdir -p /c/msys64/tmp/makeshim
+[ -x /c/msys64/tmp/makeshim/make.exe ] || cp /c/msys64/ucrt64/bin/mingw32-make.exe /c/msys64/tmp/makeshim/make.exe
+BD=/c/msys64/tmp/compbuild; rm -rf "$BD"; mkdir -p "$BD"; cd "$BD"
+/c/msys64/ucrt64/bin/verilator_bin.exe --binary -sv --timing -O2 -Wno-fatal -Wno-lint \
+  /e/MiSTer/Apple-II_FPGAdev/Apple-II_MiSTer_newsdee/tools/tb_video_pipeline_regress.sv \
+  /e/MiSTer/Apple-II_FPGAdev/Apple-II_MiSTer_newsdee/rtl/video/video_pipeline.sv \
+  /e/MiSTer/Apple-II_FPGAdev/Apple-II_MiSTer_newsdee/rtl/video/apple_composite.sv \
+  /e/MiSTer/Apple-II_FPGAdev/Apple-II_MiSTer_newsdee/rtl/video/composite_decoder.sv \
+  /e/MiSTer/Apple-II_FPGAdev/Apple-II_MiSTer_newsdee/rtl/video/vga_controller.v \
+  --top-module tb_video_pipeline_regress -o tb_regress && ./obj_dir/tb_regress
+```
 - [ ] **M5** — verification (Verilator lint / targeted smoke with
       `use_composite=0` → behavior identical to pre-change); update this doc.
 
 ## Open / for the user
 
-- Quartus A&S + full compile (user runs; see AGENTS.md).
-- Hardware check of each preset + the RGB↔Composite toggle.
+- **Quartus Analysis & Synthesis** (cheap binding check) — proves the
+  VHDL/Verilog mix + `video_pipeline`/`apple_composite`/`composite_decoder`
+  bind and elaborate:
+  ```bat
+  cd /d E:\MiSTer\Apple-II_FPGAdev\Apple-II_MiSTer_newsdee
+  quartus_map Apple-II --read_settings_files=on --write_settings_files=off
+  ```
+- **Full compile** (map+fit+sta+asm) for a usable RBF (user runs):
+  ```bat
+  quartus_sh --flow compile Apple-II
+  ```
+- **Hardware**: toggle **OSD → Video → "Color sharpness"** between RGB and
+  Composite; with Composite, **"Composite preset"** selects
+  Calibrated / B&W / Punchy / Broken TV. Confirm each preset looks right and
+  the RGB↔Composite toggle is glitch-free.
+- Watch the fitter for the ALM/M10K delta from adding the composite encoder +
+  decoder (a few hundred to low-thousands of ALMs expected; check timing).
