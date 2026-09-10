@@ -31,9 +31,10 @@ module savestate_ddr_l1b #(
   reg [28:0] address_latched;
 
   // Slot base within the advertised SS3E000000:200000 region:
-  // 512 KiB per slot = 0x10000 64-bit beats. The 30-bit intermediate keeps
-  // the add lint-clean; the sum always fits the 29-bit DDRAM address space.
-  wire [29:0] slot_base_ext = {1'b0, BASE_ADDR} + {1'b0, slot_sel, 16'd0, 11'd0};
+  // 2 MiB per slot (= ss_size, 0x40000 64-bit beats); the 4 slots exactly
+  // fill the 8 MiB region. The 30-bit intermediate keeps the add lint-clean;
+  // the sum always fits the 29-bit DDRAM address space.
+  wire [29:0] slot_base_ext = {1'b0, BASE_ADDR} + {1'b0, slot_sel, 18'd0};
   wire [28:0] slot_base = slot_base_ext[28:0];
 
   assign ddram_clk = clk;

@@ -254,18 +254,18 @@ Advertise the standard MiSTer region in `CONF_STR`:
 "Apple-II;SS3E000000:200000,...;"
 ```
 
-Use four fixed slots within that 2 MiB region:
+Use four fixed slots within the advertised SS region (4 x ss_size, 2 MiB each):
 
 - framework byte base: `32'h3E000000`;
 - direct 64-bit DDR base: `29'h07C00000`;
-- slot size: 512 KiB;
-- direct slot stride: `29'h00010000` 64-bit beats;
+- slot stride: 2 MiB (matches the advertised `ss_size` = `0x200000`);
+- direct slot stride: `29'h00040000` 64-bit beats;
 - selected slot: 0 through 3;
 - `DDRAM_BURSTCNT = 1`;
 - `DDRAM_BE = 8'hFF`;
 - one acknowledged 64-bit operation at a time.
 
-The payload is approximately 128 KiB plus headers. Four 512 KiB slots exactly occupy the advertised 2 MiB region while leaving per-slot format growth room.
+The payload is approximately 128 KiB plus headers, well inside the 2 MiB slot stride. (The earlier draft's 512 KiB stride read `:200000` as the region total; the miosd source says `size` is per-slot - see the SD-persistence note above.)
 
 Latch the selected slot when accepting a request. Changing the OSD selector while busy must not redirect an active transfer.
 
