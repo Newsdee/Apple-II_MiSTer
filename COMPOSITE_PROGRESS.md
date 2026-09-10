@@ -40,7 +40,12 @@ active project file lists, so they are left untouched.
 - [x] **M1** — create `rtl/video/`; move `vga_controller.v`; copy
       `apple_composite.sv` (generic, knob-port) + `composite_decoder.sv`;
       register all in `files.qip` + `Apple-II.qsf`.
-- [ ] **M2** — write `rtl/video/video_pipeline.sv` (switch + presets + mux).
+- [x] **M2** — write `rtl/video/video_pipeline.sv` (switch + presets + mux);
+      register it. Verilator `--lint-only -Wall`: **video_pipeline.sv is clean
+      (0 warnings)**. Remaining warnings are pre-existing in the moved files
+      (`vga_controller.v` 166, `composite_decoder.sv` 6 — WIDTHEXPAND/
+      WIDTHTRUNC, all benign) plus one benign `apple_composite.sv` warning
+      (`video_pipe[3]` unused because `pixel_delay` is tied to 0).
 - [ ] **M3** — wire `apple2_top_woz.v`: swap `vga_controller tv(...)` for
       `video_pipeline vp(...)`, add `use_composite` / `comp_preset[1:0]` inputs.
 - [ ] **M4** — wire `Apple-II_woz.sv`: add the `P2O12` preset OSD option; drive
