@@ -114,6 +114,13 @@ parameter CONF_STR = {
 	"P4oB,Joystick to keys,Off,On;",
 	"P4F3,A2K,Load Joy Map;",
 	"P4-;",
+	"P5,Save States;",
+	"P5-;",
+	"P5d8oD,Savestates to SDCard,Off,On;",
+	"P5oEF,Savestate Slot,1,2,3,4;",
+	"P5d7rG,Save state (F6);",
+	"P5d7rH,Restore state (F5);",
+	"P5-;",
 	"-;",
 	"R0,Cold Reset;",
 	// Gamepad layout (ABXYLR + Start/Select), one slot per hps_io bus bit.
@@ -122,6 +129,25 @@ parameter CONF_STR = {
 	"JA,Btn1|A,Btn2|B,Start,Select,L,R,X,Y;",
 	"jn,Btn1|A,Btn2|B,Start,Select,L,R,X,Y;",
 	"jp,Y|P,B;",
+	// Save-state info strings (index 0 is the "I" marker): 1-4 active slot,
+	// 5-12 "State N saved/loaded" (5 + 2*slot + load), 13 Saturn, 14 invalid,
+	// 15 incompatible. Driven on hps_io.info by rtl/savestate_ui.sv.
+	"I,",
+	"Active slot 1,",
+	"Active slot 2,",
+	"Active slot 3,",
+	"Active slot 4,",
+	"State 1 saved,",
+	"State 1 loaded,",
+	"State 2 saved,",
+	"State 2 loaded,",
+	"State 3 saved,",
+	"State 3 loaded,",
+	"State 4 saved,",
+	"State 4 loaded,",
+	"Save states unavailable (Saturn),",
+	"Invalid or empty state,",
+	"Incompatible state format or CPU;",
 	"V,v",`BUILD_DATE
 };
 
@@ -255,8 +281,13 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 
 	.buttons(buttons),
 	.status(status),
-	.status_in({status[63:43],virtual_keyboard_enabled_toggle?~status[42]:status[42],virtual_keyboard_transparency_cycle?virtual_keyboard_transparency_req:status[41:40],status[39:26],palette_toggle?palette_req:status[25:24],status[23:21],video_toggle?screen_mode_req:status[20:19],status[18:0]}),
-	.status_set(video_toggle || palette_toggle || virtual_keyboard_transparency_cycle || virtual_keyboard_enabled_toggle),
+	// Bit 45 ("Savestates to SDCard") is forced low: the option is a disabled
+	// preview and the persistence path is not implemented.
+	.status_in({status[63:46],1'b0,status[44:43],virtual_keyboard_enabled_toggle?~status[42]:status[42],virtual_keyboard_transparency_cycle?virtual_keyboard_transparency_req:status[41:40],status[39:26],palette_toggle?palette_req:status[25:24],status[23:21],video_toggle?screen_mode_req:status[20:19],status[18:0]}),
+	.status_set(video_toggle || palette_toggle || virtual_keyboard_transparency_cycle || virtual_keyboard_enabled_toggle || ss_boot_clear),
+	.status_menumask(ss_menumask),
+	.info_req(ss_info_req),
+	.info(ss_info),
 	.forced_scandoubler(forced_scandoubler),
 	.gamma_bus(gamma_bus),
 
@@ -383,6 +414,30 @@ wire        slot_wr;
 wire [63:0] slot_wdata;
 wire [63:0] slot_rdata;
 wire        slot_ready;
+
+// Save-state UI (OSD page, hotkeys, feedback) - see rtl/savestate_ui.sv.
+wire [1:0]  ss_error_code;
+wire        ui_save_req;
+wire        ui_load_req;
+wire [1:0]  ui_ss_slot;
+wire [15:0] ss_menumask;
+wire        ss_info_req;
+wire [7:0]  ss_info;
+
+// One-shot startup clear: force the (unimplemented) "Savestates to SDCard"
+// bit 45 low in case an old configuration left it set. The counter
+// saturates at 16 so the clear pulse fires exactly once after reset.
+reg  [4:0] ss_boot_cnt;
+reg        ss_boot_clear;
+always @(posedge clk_sys) begin
+	if (RESET) begin
+		ss_boot_cnt <= 5'd0;
+		ss_boot_clear <= 1'b0;
+	end else begin
+		if (ss_boot_cnt < 5'd16) ss_boot_cnt <= ss_boot_cnt + 5'd1;
+		ss_boot_clear <= (ss_boot_cnt == 5'd15);
+	end
+end
 wire [1:0] virtual_keyboard_transparency_req = virtual_keyboard_visibility + 1'd1;
 reg [1:0] screen_mode_req;
 reg [1:0] palette_req;
@@ -711,13 +766,37 @@ end
 assign ram_ss_rdata = ram_ss_bank ? aux_ram_q_b : main_ram_q_b;
 assign ss_rdata = (ss_addr == 10'd10) ? {63'd0, active_cpu} : top_ss_rdata;
 
+// Save states are available only with Saturn out of slot 5 and no reset,
+// download, or save-state transaction in flight. This gates the OSD command
+// lines (status_menumask bit 7); the manager independently rejects.
+savestate_ui savestate_ui (
+	.clk(clk_sys),
+	.reset(dd_reset),
+	.allow_ss(!saturn_5_inslot && !dd_reset && !ioctl_download && !ss_busy),
+	.ss_busy(ss_busy),
+	.ss_done(ss_done),
+	.ss_error(ss_error),
+	.ss_error_code(ss_error_code),
+	.osd_slot(status[47:46]),
+	.osd_save(status[48]),
+	.osd_restore(status[49]),
+	.hk_save(save_request),
+	.hk_load(load_request),
+	.ss_save_req(ui_save_req),
+	.ss_load_req(ui_load_req),
+	.ss_slot(ui_ss_slot),
+	.info_req(ss_info_req),
+	.info(ss_info),
+	.status_menumask(ss_menumask)
+);
+
 savestate_manager_l1b state_manager (
 	.clk(clk_sys), .reset(dd_reset),
-	.request_save(save_request), .request_load(load_request),
+	.request_save(ui_save_req), .request_load(ui_load_req),
 	.allow_save_state(!saturn_5_inslot),
 	.cpu_type(current_cpu), .cpu_frozen(cpu_frozen),
 	.stall(), .machine_ce(machine_ce), .busy(ss_busy), .done(ss_done),
-	.error(ss_error), .locked_cpu_type(ss_locked_cpu),
+	.error(ss_error), .error_code(ss_error_code), .locked_cpu_type(ss_locked_cpu),
 	.ss_addr(ss_addr), .ss_wdata(ss_wdata), .ss_wren(ss_wren), .ss_rdata(ss_rdata),
 	.ram_bank(ram_ss_bank), .ram_addr(ram_ss_addr), .ram_rd(ram_ss_rd),
 	.ram_wr(ram_ss_wr), .ram_wdata(ram_ss_wdata), .ram_rdata(ram_ss_rdata),
@@ -727,7 +806,7 @@ savestate_manager_l1b state_manager (
 
 savestate_ddr_l1b #(.BASE_ADDR(29'h07C00000)) ddr_ss (
 	.clk(clk_sys), .reset(dd_reset),
-	.slot_addr(slot_addr), .slot_rd(slot_rd), .slot_wr(slot_wr),
+	.slot_addr(slot_addr), .slot_sel(ui_ss_slot), .slot_rd(slot_rd), .slot_wr(slot_wr),
 	.slot_wdata(slot_wdata), .slot_rdata(slot_rdata), .slot_ready(slot_ready),
 	.ddram_clk(DDRAM_CLK), .ddram_busy(DDRAM_BUSY),
 	.ddram_burstcnt(DDRAM_BURSTCNT), .ddram_addr(DDRAM_ADDR),
