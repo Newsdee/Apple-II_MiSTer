@@ -450,12 +450,14 @@ module apple2_top(
 
     // 60 Hz IRQ (level_2/level_2b pattern): one short pulse per VBL
     // rising edge, in the 14 MHz domain.  DEAD as of 2026-09-10:
-    // irq_60hz_pulse no longer drives IRQ_n (removed - the VBL-locked
-    // pulse corrupted video: part of the screen missing, hardware-
-    // verified 2026-09-10; see the IRQ_n port comment below).  Kept
-    // for reference; trimmed in synthesis.  A properly-timed 60 Hz
-    // heartbeat (needed for the DOS 3.3 boot one-second wait) is an
-    // open follow-up (CLEANUP_TODO.md).
+    // irq_60hz_pulse no longer drives IRQ_n - the VBL-locked pulse
+    // corrupted video (part of the screen missing; hardware-verified
+    // 2026-09-10; see the IRQ_n port comment below).  It was added
+    // 2026-09-09 as a stand-in for the machine 60 Hz heartbeat to fix
+    // a DOS 3.3 boot hang - a red herring: hardware retest 2026-09-10
+    // confirmed DOS 3.3 .woz boots fine without it (the original hang
+    // was a disk-transport bug fixed in the woz01->woz04 iterations).
+    // Kept for reference; trimmed in synthesis.
     reg  [4:0] irq_60hz_cnt;
     reg        vbl_irq_d;
     wire       irq_60hz_pulse = (irq_60hz_cnt != 5'd0);

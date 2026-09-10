@@ -69,7 +69,7 @@ After the toggle:
 
 Test with disposable writable images where writes are involved.
 
-1. Cold boot a known DOS 3.3 WOZ image in Drive 1. *Known to hang as of 2026-09-10*: the 60 Hz IRQ that satisfied the one-second wait was removed (hardware-verified video fix - the VBL-locked pulse corrupted the screen), and the core does not model the 60 Hz heartbeat. Until the heartbeat rework, do the video/media checks from HDV software; the floppy-boot step is blocked on the heartbeat follow-up (CLEANUP_TODO.md).
+1. Cold boot a known DOS 3.3 WOZ image in Drive 1. **PASS (2026-09-10 hardware retest)**: boots to the READY. prompt with the 60 Hz pulse removed - the earlier one-second-wait hang hypothesis was a red herring (the original Sep 9 hang was a disk-transport bug, fixed in the woz01->woz04 iterations; the core does not model the 60 Hz heartbeat but the boot path does not need it). Repeat 2-3 cold boots to confirm repeatability, and verify the screen stays clean during and after boot.
 2. Confirm Drive 1 reads and that its LED distinguishes motor-active from host transfer activity as documented.
 3. Write a file, reboot or remount, and verify persistence when the image is writable.
 4. Enable Drive 1 write protection and prove the same write is blocked.
