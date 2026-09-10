@@ -6,7 +6,7 @@ Save-state support is wired end-to-end in the MiSTer wrapper (manager, DDR, hotk
 
 Completed 2026-09-10 (OSD integration, Phase 5):
 
-- `rtl/savestate_ui.sv` (new): NES-style UI controller. Tracks `status[47:46]` slot selection (held while busy), converts the OSD `rG`/`rH` command-line pulses and F5/F6 hotkeys into one-cycle manager requests, latches op type + slot at request time, and reports results from `ss_done`/`ss_error` on the hps_io `info` bus. Drives `status_menumask` bit 7 (availability) and holds bit 8 at 0 (SD-card line permanently grayed).
+- `rtl/savestate_ui.sv` (new): NES-style UI controller. Tracks `status[47:46]` slot selection (held while busy), converts the OSD `rG`/`rH` command-line pulses and F5/F6 hotkeys into one-cycle manager requests, latches op type + slot at request time, and reports results from `ss_done`/`ss_error` on the hps_io `info` bus. Drives `status_menumask` bit 7 (availability) and holds bit 8 at 0 (orphaned while the SDCard line is removed).
 - `rtl/savestate_manager_l1b.sv`: additive `error_code[1:0]` output (1 rejected, 2 invalid/empty, 3 incompatible). No other behavior change; level-1b harness re-passed with new code assertions.
 - `rtl/savestate_ddr_l1b.sv`: additive `slot_sel[1:0]` input; address = BASE_ADDR + slot*0x10000 beats (512 KiB stride).
 - `Apple-II.sv`: `Save States` OSD page (P5) after the Virtual keyboard page; `I,` info-string table; `status_menumask`/`info_req`/`info` connected on `hps_io`; `status_in` forces bit 45 (SD persistence) low with a one-shot startup clear; hotkey requests routed through the UI; `savestate_ui.sv` registered in `files.qip` and `Apple-II.qsf`.
@@ -49,7 +49,7 @@ The current `hps_io.sv` supports both required mechanisms: `status_menumask[15:0
 
 ### Final status allocation (audit completed 2026-09-10)
 
-The ND miosd fork (and current upstream, Release 20260907) maps uppercase `O` options to status bits 0-31 and lowercase `o` options to the same hex digit **plus 32** (bits 32-63); two hex digits form a contiguous range (first digit must be the lower bit). Command lines use `r`/`R` + bit: miosd pulses the bit high-then-low when the user selects the line. `H`/`h`/`D`/`d` prefixes + a bit read the core's `status_menumask` to hide/gray a line. Info strings are the comma-separated fields of the CONF_STR line starting with `I,` (field 0 is the marker); miosd polls `info` (register 0x36, read-and-clear) and toasts field N when the core pulses `info_req` with index N.
+The ND miosd fork (and current upstream, Release 20260907) maps uppercase `O` options to status bits 0-31 and lowercase `o` options to the same hex digit **plus 32** (bits 32-63); two hex digits form a contiguous range (first digit must be the lower bit). Command lines use `r`/`R` + bit: miosd pulses the bit high-then-low when the user selects the line. `H`/`h`/`D`/`d` flag + a bit read the core's `status_menumask` to hide/gray a line - **the flag must be FIRST on the line, before the `P<page>` token** (e.g. `d8P5oD,...`, `H8P5,...`); it is NOT consumed after the page token (verified in `Main_MiSTer/menu.cpp`: both parse passes run the d/h loop before the `P` check, and `user_io_hd_mask` takes the bit from the character after the flag; confirmed by shipping NES usage `d6P1O5` / `d7rA` / `H8P5`). A misplaced flag (e.g. `P5d8oD`) is silently dropped by the render pass (unknown option type `d` -> no line written, no entry counted) while the selection pass still counts the line as an entry -> every following line on the page is off by one: its toggle/status binding shifts to the wrong confstr entry (hardware: P5 slot selector "stuck at 1" with the malformed line present - woz06 and woz08 stuck, woz07 without any d flag worked). The 2026-09-10 conclusion "miosd version / mishandles d prefix" was wrong: the feature exists, the token position was simply invalid. Info strings are the comma-separated fields of the CONF_STR line starting with `I,` (field 0 is the marker); miosd polls `info` (register 0x36, read-and-clear) and toasts field N when the core pulses `info_req` with index N.
 
 Full bitmap audit of `Apple-II.sv` (word 0 = bits 0-31, word 1 = bits 32-63):
 
@@ -82,10 +82,10 @@ Full bitmap audit of `Apple-II.sv` (word 0 = bits 0-31, word 1 = bits 32-63):
 | 42 | P4oA | virtual keyboard |
 | 43 | P4oB | joystick to keys |
 | 44 | P1oC | **pause when OSD is open** (conflicts with the old tentative bit 44) |
-| **45** | **P5oD (new)** | Savestates to SDCard - shown, grayed (`d8`, menumask[8]=0), forced Off |
+| **45** | P5oD (REMOVED 2026-09-11) | Savestates to SDCard - line removed (the misplaced `P5d8oD` flag broke the slot selector on any miosd); bit stays reserved, `status_in` forces it low; re-add as `d8P5oD` (flag first) once a patched miosd runs |
 | **46-47** | **P5oEF (new)** | Savestate Slot, 1-4 (index 0-3) |
-| **48** | **P5 rG (new)** | Save state (F6) command line, gated by `d7` (menumask[7]) |
-| **49** | **P5 rH (new)** | Restore state (F5) command line, gated by `d7` |
+| **48** | **P5 rG (new)** | Save state (F6) command line, un-gated (diagnostic strip `61e33d8`; `savestate_ui` still drives menumask bit 7 = allow_ss so a correctly-placed `d7` prefix can be restored later) |
+| **49** | **P5 rH (new)** | Restore state (F5) command line, un-gated (same as rG) |
 
 Free after allocation: word 0 bits 1-3, 10; word 1 bit 37 and bits 50-63.
 
@@ -111,7 +111,7 @@ After the interim OSD path is proven:
 2. Move the Apple reset shortcut from F2 to F5 when the F1-F4 mapping is enabled.
 3. Add the NES-style gamepad modifier, left/right slot selection, and Start+Up/Down load/save chords.
 4. Allow keyboard or gamepad slot changes to update `status[46:45]` through the composed `status_in/status_set` path.
-5. Implement standard MiSTer Main SD persistence, then enable the existing gray OSD option and add the compatible size/generation header behavior.
+5. Implement standard MiSTer Main SD persistence, then re-add the SDCard OSD option (correct `d8P5oD` form) and add the compatible size/generation header behavior.
 
 Until that later phase, save states remain volatile across core reload or power-off.
 
@@ -130,7 +130,7 @@ Until that later phase, save states remain volatile across core reload or power-
 2. **Manager protocol words (core RTL; can land now, inert without #1).** Slot word 0 must carry the protocol pair: first DWORD (bits 31:0) = changing per-save counter, second DWORD (bits 63:32) = used size in DWORD units. Today word 0 = `{MAGIC, 1, 0, USED_WORDS}`: the counter half is the static `0x00014000` (never changes -> no repeat write-back) and the size half = MAGIC -> `(size+2)*4` ~ 4.4 GiB > ss_size -> EVERY write-back would be skipped. Move MAGIC/version/CPU into slot word 1 and make `LOAD_HEADER1` a masked check (word 0: size field valid, counter ignored; word 1: magic + version + CPU).
 3. **Counter-init edge.** miosd stores counter = 1 after loading a `.ss` file at mount. A core counter starting at 0 -> first save writes 1 -> `1 != 1` / `1 > 1` both false -> the first save would silently not persist. Scheme: 32-bit counter, init 1, pre-increment per save (first save = 2); safe under both `!=` (upstream) and `>` (ND) semantics.
 4. **Slot stride = `ss_size`** — DONE 2026-09-11 (`savestate_ddr_l1b.sv`, 2 MiB = `:200000`; main-repo commit d798282).
-5. **P5 "Savestates to SDCard" line.** With #1 in, persistence is unconditional per mount (no runtime off-switch via status bits in stock miosd). Decide: keep grayed (informational), relabel, or wire a status bit into the patched miosd. Today it is grayed via `d8` + menumask bit 8 = 0.
+5. **P5 "Savestates to SDCard" line - REMOVED 2026-09-11.** The line was removed from both wrappers: the misplaced `P5d8oD` flag broke the P5 slot selector on ANY miosd (grammar note above), and the grayed-out informational value was not worth the risk. With #1 in, persistence is unconditional per mount; re-add the line then in the correct `d8P5oD` form (flag first), or wire a live status bit for an on/off switch in the patched miosd. `savestate_ui` keeps driving menumask bit 8 = 0 (orphaned, harmless).
 6. **Validation.** TB: counter increments per save; size DWORD correct; masked load accepts differing counters and rejects `0xFFFFFFFF`/bad size. Hardware (patched miosd only): save -> `<game>_N.ss` appears (~128 KiB) and miosd toasts "Saving the state" ~1 s later; power-cycle -> file reloads at mount -> restore works; disk swap -> per-game files.
 7. **Edge cases (document on enable):** ~1 s loss window before power-off (1 s poll); every mount zeroes all 4 slots (states are per-game); up to 4 x <= 2 MiB files per game. With two drives mounted (and once the woz build mixes formats across drives), the .ss basename follows the LAST-mounted media file (process_ss re-fires on every S-line mount: re-zero + reload).
 
