@@ -181,6 +181,11 @@ module apple2_top(
     input         SEAM_RUN_FILL;
     input         SEAM_RUN_WIDE;
     input         NTSC_VERTICAL_COMB;
+    // Composite video switch (see rtl/video/video_pipeline.sv).
+    //   use_composite: "Color sharpness" RGB/Composite (Apple-II_woz status[4]).
+    //   comp_preset:   0=Calibrated 1=B&W 2=Punchy 3=Broken TV (status[2:1]).
+    input         use_composite;
+    input  [1:0]  comp_preset;
     input         PALMODE;		// PAL/NTSC selection
     input         ROMSWITCH;
 
@@ -527,9 +532,11 @@ module apple2_top(
                       (ss_addr == 10'd9) ?
                       {36'd0, spk_avg, spk_sum, spk_cnt} : core_ss_rdata;
 
-    vga_controller tv(
+    video_pipeline vp(
         .CLK_14M(CLK_14M),
         .VIDEO(VIDEO),
+        .HBL(HBL),
+        .VBL(VBL),
         .COLOR_LINE(COLOR_LINE_CONTROL),
         .SCREEN_MODE(SCREEN_MODE),
         .COLOR_PALETTE(COLOR_PALETTE),
@@ -538,22 +545,22 @@ module apple2_top(
         .SEAM_RUN_WIDE(SEAM_RUN_WIDE),
         .RUN_FILL_OK(RUN_FILL_OK),
         .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
-        .HBL(HBL),
-        .VBL(VBL),
-        .VGA_HS(hsync),
-        .VGA_VS(vsync),
-        .VGA_HBL(hblank),
-        .VGA_VBL(vblank),
-        .VGA_R(r),
-        .VGA_G(g),
-        .VGA_B(b),
         // for custom palette loader
         .ioctl_addr(ioctl_addr),
         .ioctl_data(ioctl_data),
         .ioctl_index(ioctl_index),
         .ioctl_download(ioctl_download),
         .ioctl_wr(ioctl_wr),
-        .ioctl_wait(ioctl_wait)
+        .ioctl_wait(ioctl_wait),
+        .use_composite(use_composite),
+        .comp_preset(comp_preset),
+        .R(r),
+        .G(g),
+        .B(b),
+        .HS(hsync),
+        .VS(vsync),
+        .HBL_O(hblank),
+        .VBL_O(vblank)
     );
 
 `ifdef JOY_TO_KEY

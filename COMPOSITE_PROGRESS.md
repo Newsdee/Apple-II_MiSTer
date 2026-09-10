@@ -46,8 +46,11 @@ active project file lists, so they are left untouched.
       (`vga_controller.v` 166, `composite_decoder.sv` 6 — WIDTHEXPAND/
       WIDTHTRUNC, all benign) plus one benign `apple_composite.sv` warning
       (`video_pipe[3]` unused because `pixel_delay` is tied to 0).
-- [ ] **M3** — wire `apple2_top_woz.v`: swap `vga_controller tv(...)` for
+- [x] **M3** — wire `apple2_top_woz.v`: swap `vga_controller tv(...)` for
       `video_pipeline vp(...)`, add `use_composite` / `comp_preset[1:0]` inputs.
+      Verilator parse of `apple2_top_woz.v` (all Verilog/SV sources): no syntax
+      errors; all 28 `video_pipeline` ports connected, every referenced signal
+      declared. (Full mixed-language binding is for Quartus A&S.)
 - [ ] **M4** — wire `Apple-II_woz.sv`: add the `P2O12` preset OSD option; drive
       `use_composite=status[4]`, `comp_preset=status[2:1]`.
 - [ ] **M5** — verification (Verilator lint / targeted smoke with
