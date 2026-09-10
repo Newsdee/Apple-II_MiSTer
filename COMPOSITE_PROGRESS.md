@@ -51,8 +51,12 @@ active project file lists, so they are left untouched.
       Verilator parse of `apple2_top_woz.v` (all Verilog/SV sources): no syntax
       errors; all 28 `video_pipeline` ports connected, every referenced signal
       declared. (Full mixed-language binding is for Quartus A&S.)
-- [ ] **M4** — wire `Apple-II_woz.sv`: add the `P2O12` preset OSD option; drive
-      `use_composite=status[4]`, `comp_preset=status[2:1]`.
+- [x] **M4** — wire `Apple-II_woz.sv`: add the `P2O12,Composite preset,
+      Calibrated,B&W,Punchy,Broken TV` OSD option (status[2:1]); drive
+      `use_composite=status[4]`, `comp_preset=status[2:1]` in the apple2_top
+      instance. Verilator parse: no syntax errors.
+
+  **Integration complete for the Woz build.** M5 = verification.
 - [ ] **M5** — verification (Verilator lint / targeted smoke with
       `use_composite=0` → behavior identical to pre-change); update this doc.
 
