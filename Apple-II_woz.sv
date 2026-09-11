@@ -61,8 +61,8 @@ video_freak video_freak
 parameter CONF_STR = {
 	"Apple-II;SS3E000000:200000,UART19200:9600:4800:2400:1200:300;",
 	"-;",
-	"S0,WOZ,Drive 1;",
-	"S2,WOZ,Drive 2;",
+	"S0,NIBDSKDO PO WOZ,Drive 1;",
+	"S2,NIBDSKDO PO WOZ,Drive 2;",
 	"OQR,Write Protect,None,Drive 1,Drive 2,Drive 1 & 2;",
 	"-;",
 	"S1,HDV;",
@@ -117,6 +117,7 @@ parameter CONF_STR = {
 	"P4-;",
 	"P5,Save States;",
 	"P5-;",
+	"d8P5oD,Savestates to SDCard,Off,On;",
 	"P5oEF,Savestate Slot,1,2,3,4;",
 	"P5rG,Save state (F6);",
 	"P5rH,Restore state (F5);",

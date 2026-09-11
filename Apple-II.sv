@@ -115,6 +115,7 @@ parameter CONF_STR = {
 	"P4-;",
 	"P5,Save States;",
 	"P5-;",
+	"d8P5oD,Savestates to SDCard,Off,On;",
 	"P5oEF,Savestate Slot,1,2,3,4;",
 	"P5rG,Save state (F6);",
 	"P5rH,Restore state (F5);",
