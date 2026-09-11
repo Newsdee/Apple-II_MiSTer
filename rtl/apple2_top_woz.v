@@ -59,6 +59,8 @@ module apple2_top(
     SEAM_RUN_FILL,
     SEAM_RUN_WIDE,
     NTSC_VERTICAL_COMB,
+    use_composite,
+    comp_preset,
     PALMODE,
     ROMSWITCH,
     PS2_Key,
