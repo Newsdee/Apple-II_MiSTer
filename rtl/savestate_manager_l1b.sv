@@ -92,9 +92,9 @@ module savestate_manager_l1b (
       SAVE_HEADERS: begin
         slot_addr = {10'd0, header_index};
         slot_wr = 1'b1;
-        // word 0 = {size_dwords, counter}, word 1 = {MAGIC, version, reserved[23:0], cpu}
+        // word 0 = {size_dwords, counter}, word 1 = {MAGIC, version, reserved[23:1], cpu}
         slot_wdata = (header_index == 0) ? {SS_SIZE_DWORDS, ss_counter} :
-                     (header_index == 1) ? {MAGIC, SS_VERSION, 8'd0, 16'd0, locked_cpu_type} : 64'd0;
+                     (header_index == 1) ? {MAGIC, SS_VERSION, 23'd0, locked_cpu_type} : 64'd0;
       end
       SAVE_REG_CAPTURE: ss_addr = {6'd0, reg_index};
       SAVE_REG_WRITE: begin
@@ -251,7 +251,7 @@ module savestate_manager_l1b (
         end
         LOAD_HEADER1: begin
           if (slot_ready) begin
-            // word 1 = {MAGIC, version, reserved[23:0], cpu}; word 0 = {size, counter}.
+            // word 1 = {MAGIC, version, reserved[23:1], cpu}; word 0 = {size, counter}.
             // Empty slot or non-state word 1 -> 2 (invalid/empty); wrong version or
             // CPU -> 3 (incompatible); bad size -> 2 (invalid). Counter is ignored.
             if (slot_rdata == 64'h0) begin
