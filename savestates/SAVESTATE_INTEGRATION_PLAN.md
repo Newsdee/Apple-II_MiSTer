@@ -14,7 +14,7 @@ Completed 2026-09-10 (OSD integration, Phase 5):
 
 Verified as of 2026-09-09:
 
-- The focused manager harness in [Apple-II-Verilog_MiSTer/unit_tests/level_1b/tb_ss_manager.sv](../Apple-II-Verilog_MiSTer/unit_tests/level_1b/tb_ss_manager.sv) passes with fresh output:
+- The focused manager harness in [Apple-II-Verilog_MiSTer/unit_tests/level_1b/tb_ss_manager.sv](../../Apple-II-Verilog_MiSTer/unit_tests/level_1b/tb_ss_manager.sv) passes with fresh output:
   - `L1B MANAGER PASS save_writes=16411 load_reads=16397 ram_bytes=131072`
 - This includes the manager-side `allow_save_state` rejection case and the 128 KiB RAM payload checks.
 - The manager path is therefore proven for the atomic save/load sequence and the Saturn-disabled rejection policy at the coordinator level.
@@ -386,7 +386,7 @@ After every source edit:
 git diff --numstat
 git diff --numstat --ignore-all-space
 git diff --check
-bash ../eol_guard.sh
+bash ../../eol_guard.sh
 ```
 
 Normal and whitespace-insensitive statistics must remain close. Preserve mixed line endings and avoid incidental `Apple-II.qsf` churn.

@@ -12,7 +12,7 @@
     .\toggle_woz.ps1 diskii   # project builds Apple-II.sv + Disk II stack
 
 SEE ALSO
-    WOZ_MERGE.md - what the variants change and how to re-sync them.
+    savestates\WOZ_MERGE.md - what the variants change and how to re-sync them.
 #>
 param(
     [Parameter(Mandatory = $true)]
