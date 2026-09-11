@@ -112,6 +112,7 @@ After the interim OSD path is proven:
 3. Add the NES-style gamepad modifier, left/right slot selection, and Start+Up/Down load/save chords.
 4. Allow keyboard or gamepad slot changes to update `status[46:45]` through the composed `status_in/status_set` path.
 5. Implement standard MiSTer Main SD persistence, then re-add the SDCard OSD option (correct `d8P5oD` form) and add the compatible size/generation header behavior.
+6. OSK save-state buttons (user idea 2026-09-11, PLAN LATER): the virtual-keyboard CMD panel has room for save-state LOAD / SAVE / slot-change controls wired to the same `savestate_ui` request path as the OSD page and F-keys. No RTL state-machine change expected - the UI already latches slot/op at request time; this only adds input sources. Decide key placement vs the existing CMD/Ctrl/Option row when planned.
 
 Until that later phase, save states remain volatile across core reload or power-off.
 
@@ -134,6 +135,45 @@ Until that later phase, save states remain volatile across core reload or power-
 5. **P5 "Savestates to SDCard" line - REMOVED 2026-09-11.** The line was removed from both wrappers: the misplaced `P5d8oD` flag broke the P5 slot selector on ANY miosd (grammar note above), and the grayed-out informational value was not worth the risk. Persistence is unconditional per mount once #1 lands. Note: v260823 already supports the d/h flag (2022 feature), so the line COULD be re-added now in the correct `d8P5oD` form (flag first) if the user wants the visible-grayed state back - optional; preferable to bundle it with a future compile. Alternatively wire a live status bit for an on/off switch in the patched miosd. `savestate_ui` keeps driving menumask bit 8 = 0 (orphaned, harmless).
 6. **Validation.** TB: counter increments per save; size DWORD correct; masked load accepts differing counters and rejects `0xFFFFFFFF`/bad size. Hardware (patched miosd only): save -> `<game>_N.ss` appears (~128 KiB) and miosd toasts "Saving the state" ~1 s later; power-cycle -> file reloads at mount -> restore works; disk swap -> per-game files.
 7. **Edge cases (document on enable):** ~1 s loss window before power-off (1 s poll); every mount zeroes all 4 slots (states are per-game); up to 4 x <= 2 MiB files per game. With two drives mounted (and once the woz build mixes formats across drives), the .ss basename follows the LAST-mounted media file (process_ss re-fires on every S-line mount: re-zero + reload).
+## Core-Side + miosd Implementation Plan (2026-09-11)
+
+Execution order (per user 2026-09-11): (1) RTL protocol words, (2) protocol TB, (3) P5 line, (4) miosd patch LAST (user builds + flashes). Items 1-3 are inert without the miosd patch and can land on `woz-disk-support` independently.
+
+### 1. Manager protocol words + save counter (`rtl/savestate_manager_l1b.sv`)
+
+- **Word 0** = `{SS_SIZE_DWORDS, ss_counter}`: upper 32 = payload size in 32-bit units, lower 32 = per-save counter. `SS_SIZE_DWORDS = 32'd32832` (= 2 x 16416 64-bit slot words = 131328 B; miosd then writes `(size+2)*4` = 131336 B per file, i.e. ~128 KiB - matches the recorded file-size expectation).
+- **Word 1** = `{MAGIC, SS_VERSION, 24'b0, locked_cpu_type}`: `[63:32]` magic `41324C31`, `[31:24]` version `8'd1`, `[23:1]` reserved (unchecked on load), `[0]` CPU.
+- **Counter**: `reg [31:0] ss_counter`; reset -> 1; pre-increment ONLY on an accepted save (IDLE->FREEZE with `request_save`). First save writes 2. Correct by construction: miosd stores counter = 1 after every mount AND the core counter resets to 1 on every boot, so they always align at 1 and the first post-mount save is always 2 -> always `!= 1` -> persisted. Loads never touch the counter; rejected saves (allow_save_state = 0) do not increment it.
+- **Load check** (replaces the fixed `HEADER0` compare); error codes keep their UI messages:
+
+| condition | code |
+|---|---|
+| word 1 == 0 (empty slot) | 2 invalid/empty |
+| word 1 magic != MAGIC (not a state file) | 2 invalid |
+| word 1 version != 1 (foreign generation) | 3 incompatible header |
+| word 1 cpu != locked_cpu_type | 3 incompatible CPU |
+| word 0 size == 0 (no data) | 2 empty |
+| word 0 size > 32832 (e.g. 0xFFFFFFFF) | 2 invalid |
+| word 0 counter | ignored - load accepts ANY counter |
+
+### 2. Protocol TB (new, main repo: `unit_tests/savestate_manager/`)
+
+- `tb_ss_manager_protocol.sv` - self-driving, `--binary --timing` (AGENTS.md ladder recipe, make-shim PATH). The manager instantiates NO submodules, so the TB compiles the main repo's `rtl/savestate_manager_l1b.sv` directly - no DUT copy, no Verilog-repo/ladder involvement.
+- `run_protocol_test.sh` - build + run wrapper.
+- Matrix: counter = 2,3,4 across three saves; size DWORD = 0x8040 on every save; word 1 exact; load with different counter (0x1234) succeeds + full RAM/register round-trip; empty slot -> 2; 0xFFFFFFFF -> 2; size 0x8041 -> 2; bad magic -> 2; version 2 -> 3; CPU mismatch -> 3; allow_save_state = 0 -> 1; load leaves the counter unchanged (next save = counter+1, not a re-1); save-write / load-read counts unchanged (16411 / 16397).
+
+### 3. P5 "Savestates to SDCard" line (both wrappers, confstr only)
+
+- Re-add the line removed by 621bbc2 in the CORRECT form - flags first, the shipping-NES idiom (`d6P1O5`, `d7rA`): `d8P5oD,Savestates to SDCard,Off,On;` between `P5-;` and `P5oEF,Savestate Slot,1,2,3,4;` (same position as before). The original `P5d8oD` was dropped by the render pass while the selection pass still counted it -> P5 lines off by one -> stuck slot selector; the reordered form parses identically in both passes.
+- Hardware check on next compile: P5 slot selector steps 1-4 AND the grayed SDCard line is visible.
+
+### 4. miosd patch (LAST; user builds + flashes v260823 `dfb4791`)
+
+- Branch `apple2-sd-persistence` on the local `Main_MiSTer` clone @ `dfb4791`; artifact = branch + `apple2_sd_persistence.patch`.
+- **Part A - SD savestate persistence (the blocker):** the recorded 3-part spec - `is_apple2()` predicate (user_io.cpp, `orig_name`-keyed like `is_snes`); declaration in `user_io.h`; `if (ss_base && is_apple2()) process_ss(str);` beside `user_io_file_mount(str, idx)` at the S-line pick path (user_io.cpp ~1006); `is_apple2_type = 0;` in the `user_io_read_core_name()` reset block. Inert on every non-Apple-II core.
+- **Part B - dsk->woz hook (dormant today):** field-count gate at the mount-classification site (user_io.cpp ~2180): `a2_core && fields > 68 && dsk_ext` -> hook beside `iigs_mount` reusing v260823's iigs_fmt/dsk2nib_lib/in-memory-WOZ-buffer/write-back machinery (read the iigs_mount path first, then write the hook). Dormant on every existing core (release 45 / woz 67 / standard 68 fields); activates on the first feature-grown build.
+- Both parts Apple-II-gated; zero behavior change on any other core; stock miosd (unpatched) keeps working with the new core (persistence simply absent).
+
 
 ## Agreed Scope
 
