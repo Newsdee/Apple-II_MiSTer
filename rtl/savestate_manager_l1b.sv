@@ -34,8 +34,9 @@ module savestate_manager_l1b (
   input  wire        slot_ready
 );
   localparam [31:0] MAGIC = 32'h41324C31;
-  localparam [15:0] USED_WORDS = 16'd16416;
-  localparam [63:0] HEADER0 = {MAGIC, 8'd1, 8'd0, USED_WORDS};
+  localparam [15:0] USED_WORDS = 16'd16416;        // 64-bit slot words 0..16415
+  localparam [31:0] SS_SIZE_DWORDS = 32'd32832;    // payload in 32-bit units = 2 * USED_WORDS
+  localparam [7:0]  SS_VERSION = 8'd1;
 
   localparam [4:0] IDLE              = 5'd0;
   localparam [4:0] FREEZE            = 5'd1;
@@ -67,6 +68,7 @@ module savestate_manager_l1b (
   reg [63:0] pack_word;
   reg [63:0] load_word;
   reg [63:0] header0_read;
+  reg [31:0] ss_counter;
   reg [63:0] register_shadow [0:10];
 
   assign stall = busy;
@@ -90,8 +92,9 @@ module savestate_manager_l1b (
       SAVE_HEADERS: begin
         slot_addr = {10'd0, header_index};
         slot_wr = 1'b1;
-        slot_wdata = (header_index == 0) ? HEADER0 :
-                     (header_index == 1) ? {32'd1, 16'd1, 8'd1, 7'd0, locked_cpu_type} : 64'd0;
+        // word 0 = {size_dwords, counter}, word 1 = {MAGIC, version, reserved[23:0], cpu}
+        slot_wdata = (header_index == 0) ? {SS_SIZE_DWORDS, ss_counter} :
+                     (header_index == 1) ? {MAGIC, SS_VERSION, 8'd0, 16'd0, locked_cpu_type} : 64'd0;
       end
       SAVE_REG_CAPTURE: ss_addr = {6'd0, reg_index};
       SAVE_REG_WRITE: begin
@@ -155,6 +158,7 @@ module savestate_manager_l1b (
       pack_word <= 64'd0;
       load_word <= 64'd0;
       header0_read <= 64'd0;
+      ss_counter <= 32'd1;
     end else begin
       case (state)
         IDLE: begin
@@ -167,6 +171,7 @@ module savestate_manager_l1b (
               busy <= 1'b1;
               locked_cpu_type <= cpu_type;
               operation_load <= request_load;
+              if (request_save) ss_counter <= ss_counter + 1'b1;
               state <= FREEZE;
             end
           end
@@ -246,14 +251,26 @@ module savestate_manager_l1b (
         end
         LOAD_HEADER1: begin
           if (slot_ready) begin
-            if (header0_read != HEADER0) begin
+            // word 1 = {MAGIC, version, reserved[23:0], cpu}; word 0 = {size, counter}.
+            // Empty slot or non-state word 1 -> 2 (invalid/empty); wrong version or
+            // CPU -> 3 (incompatible); bad size -> 2 (invalid). Counter is ignored.
+            if (slot_rdata == 64'h0) begin
               fail_code <= 2'd2;
               state <= FAIL;
-            end else if ((slot_rdata[0] != locked_cpu_type) ||
-                (slot_rdata[31:16] != 16'd1) ||
-                (slot_rdata[15:8] != 8'd1) ||
-                (slot_rdata[7:1] != 7'd0)) begin
+            end else if (slot_rdata[63:32] != MAGIC) begin
+              fail_code <= 2'd2;
+              state <= FAIL;
+            end else if (slot_rdata[31:24] != SS_VERSION) begin
               fail_code <= 2'd3;
+              state <= FAIL;
+            end else if (slot_rdata[0] != locked_cpu_type) begin
+              fail_code <= 2'd3;
+              state <= FAIL;
+            end else if (header0_read[63:32] == 32'd0) begin
+              fail_code <= 2'd2;
+              state <= FAIL;
+            end else if (header0_read[63:32] > SS_SIZE_DWORDS) begin
+              fail_code <= 2'd2;
               state <= FAIL;
             end else begin
               reg_index <= 4'd0;
