@@ -48,7 +48,10 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate_hotkeys.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate_ui.sv
 set_global_assignment -name VERILOG_FILE rtl/timing_generator.v
 set_global_assignment -name VERILOG_FILE rtl/video_generator.v
-set_global_assignment -name VERILOG_FILE rtl/vga_controller.v
+set_global_assignment -name VERILOG_FILE rtl/video/vga_controller.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/apple_composite.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/composite_decoder.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/video_pipeline.sv
 set_global_assignment -name VERILOG_FILE rtl/apple2.v
 set_global_assignment -name VERILOG_FILE rtl/apple2_top_woz.v
 set_global_assignment -name SYSTEMVERILOG_FILE "Apple-II_woz.sv"
