@@ -50,7 +50,7 @@ module composite_decoder #(
 
 	input          [7:0] sat,         // 128 = unity
 	input          [7:0] hue,         // 256 = one full cycle
-	input          [1:0] chroma_map,  // 0 normal; 1 Q mirror; 2 swap; 3 I mirror
+	input          i_mirror,          // 1 = I-mirror chirality fix (negate I); 0 = normal (upstream)
 	input                chroma_short,// 0 = SPC boxcar; 1 = two-sample boxcar
 
 	// User luma adjust, applied after the fixed white-point gain, luma only
@@ -81,6 +81,10 @@ module composite_decoder #(
 	// flag rather than in the signal. Falls back to `luma_gain` when there is no
 	// burst to measure.
 	input                agc_en,
+
+	// Chroma from this line averaged with the one above, the way a comb set
+	// does. Luma is untouched. See the comb section.
+	input                comb_en,
 
 	output logic         ce_out,
 	output logic         hs_out,
@@ -176,21 +180,60 @@ always_ff @(posedge clk) if (ce) begin
 	else                          c16 <=  c_shf[15:0];
 end
 
+// ------------------------------------------------------------ line delay comb
+//
+// Chroma taken from the average of this line and the one above; luma from this
+// line alone.
+//
+// That split is what a comb set does. Colour is combined across line pairs and
+// loses vertical detail, luma is not and keeps it. Two lines that alternate
+// blue and orange average to no chroma at all and come out grey; a coloured
+// line over a black one puts half its colour on the black line and both keep
+// their own brightness, so the stripe stays a stripe.
+//
+// Broadcast NTSC puts 227.5 subcarrier cycles on a line and the comb takes the
+// line difference for chroma. These chips put a whole number on a line - 228
+// on a 2600, 227 on a 7800 - so chroma repeats in phase and the sum is the
+// operation that combines it. Same picture either way.
+//
+// The delay is a RAM addressed by hcnt, so it is exactly one line whatever the
+// source's line length is. c16 trails comp by a sample, so the write address
+// trails hcnt by one as well; the registered read then lands on the same
+// position in the line as the current c16 and the comb costs no pipeline stage.
+//
+// The RAM is inferred here rather than taken from a wrapper so the module stays
+// self-contained; the attribute is what keeps 1024 words out of the fabric.
+
+logic [15:0] linebuf [0:1023] /* synthesis ramstyle = "M10K" */;
+logic  [9:0] hcnt_d;
+logic signed [15:0] prev;
+
+always_ff @(posedge clk) if (ce) begin
+	hcnt_d          <= hcnt;
+	linebuf[hcnt_d] <= $unsigned(c16);
+	prev            <= $signed(linebuf[hcnt]);
+end
+
+/* verilator lint_off UNUSEDSIGNAL */
+wire signed [16:0] v_sum = c16 + prev;
+/* verilator lint_on UNUSEDSIGNAL */
+wire signed [15:0] cs = comb_en ? v_sum[16:1] : c16;
+
 // --------------------------------------------------------- notch: luma/chroma
 //
 // SPC/2 samples back is half a subcarrier cycle, so the subcarrier arrives
-// inverted: the sum cancels it and the difference keeps only it. Exact, and no
-// coefficients. It is also the only separation that works on sources whose line
-// is a whole number of subcarrier cycles, where a comb would cancel the wrong
-// one of the two.
+// inverted: the sum cancels it and the difference keeps only it. Exact, no
+// coefficients, and it does not care what the line length is. Luma is notched
+// from this line, chroma from the comb's line average.
 
-logic [HALFC-1:0][15:0] nd;
+logic [HALFC-1:0][15:0] nd, ndc;
 logic signed [15:0] yc, cc, yc_d, y_lp;
 
-wire signed [15:0] c_del = $signed(nd[HALFC-1]);
+wire signed [15:0] c_del  = $signed(nd[HALFC-1]);
+wire signed [15:0] cc_del = $signed(ndc[HALFC-1]);
 /* verilator lint_off UNUSEDSIGNAL */
 wire signed [16:0] n_sum = c16 + c_del;
-wire signed [16:0] n_dif = c16 - c_del;
+wire signed [16:0] n_dif = cs  - cc_del;
 /* verilator lint_on UNUSEDSIGNAL */
 
 // The notch takes the subcarrier out of luma but leaves what the pixel grid
@@ -204,6 +247,7 @@ wire signed [16:0] y_sum = yc + yc_d;
 
 always_ff @(posedge clk) if (ce) begin
 	nd   <= {nd[HALFC-2:0], c16};
+	ndc  <= {ndc[HALFC-2:0], cs};
 	yc   <= n_sum[16:1];
 	cc   <= n_dif[16:1];
 	yc_d <= yc;
@@ -568,17 +612,13 @@ wire signed [17:0] q8_scaled = q8_m[33:16];
 wire signed [17:0] y_raw = $signed(y8_m[33:16]);
 wire signed [26:0] y_c   = (y_raw - 18'sd128) * $signed({1'b0, contrast});
 wire signed [19:0] y_g   = $signed(y_c[26:7]);
-wire signed [20:0] y_adj = y_g + 21'sd128 + $signed({4'b0, bright});
+wire signed [20:0] y_adj = y_g + 21'sd128 + $signed(bright);
 /* verilator lint_on UNUSEDSIGNAL */
 
 always_ff @(posedge clk) if (ce) begin
 	y8 <= y_adj[17:0];
-	case (chroma_map)
-		2'd1: begin i8 <=  i8_scaled; q8 <= -q8_scaled; end
-		2'd2: begin i8 <=  q8_scaled; q8 <=  i8_scaled; end
-		2'd3: begin i8 <= -i8_scaled; q8 <=  q8_scaled; end
-		default: begin i8 <= i8_scaled; q8 <= q8_scaled; end
-	endcase
+	if (i_mirror) begin i8 <= -i8_scaled; q8 <=  q8_scaled; end
+	            else begin i8 <=  i8_scaled; q8 <=  q8_scaled; end
 end
 
 wire signed [27:0] y_sh  = {{2{y8[17]}}, y8, 8'd0};

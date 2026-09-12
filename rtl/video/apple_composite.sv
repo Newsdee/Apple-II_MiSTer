@@ -3,7 +3,7 @@
 // Apple II VIDEO (1-bit, 14.318 MHz) -> NTSC composite -> RGB.
 //
 // Generic composite module for the newsdee core: the encoder knobs
-// (sat/hue/bright/contrast/pixel_delay) and the decoder knobs (chroma_map,
+// (sat/hue/bright/contrast/pixel_delay) and the decoder knobs (i_mirror,
 // chroma_short, smear, luma_delay, agc_en) are all exposed as inputs. The
 // 4-preset mapping (Calibrated/B&W/Punchy/Broken TV) is driven from outside
 // (video_pipeline.sv), which keeps this module preset-free. The r/g/b
@@ -71,12 +71,13 @@ module apple_composite #(
   input  wire [1:0]  pixel_delay,// source delay in composite samples (0..3)
   input  wire        hs, vs,     // positive sync pulses, sample domain
   input  wire        hb, vb,     // blanking, sample domain
+  input  wire        color_line, // 1 = color on; 0 = color kill (suppress burst)
   input  wire [7:0]  sat,        // 128 = unity
   input  wire [7:0]  hue,        // 256 = one full cycle
   input  wire [7:0]  bright,     // signed luma offset, 0 = none
   input  wire [7:0]  contrast,   // mid-gray-centred gain, 128 = unity
   // Harness-only knob pass-throughs (hardwired in the FPGA copy).
-  input  wire [1:0]  chroma_map, // 0 normal; 1 Q mirror; 2 swap; 3 I mirror
+  input  wire        i_mirror,   // 1 = I-mirror chirality fix (negate I); 0 = normal (upstream)
   input  wire        chroma_short, // 0 = SPC boxcar; 1 = two-sample boxcar
   input  wire [3:0]  smear,      // chroma trail length, 0 = off
   input  wire [3:0]  luma_delay, // samples (set BELOW chroma path delay)
@@ -157,7 +158,7 @@ module apple_composite #(
   logic signed [23:0] comp;
   assign comp = hs
                      ? V_SYNC
-                    : (hb && in_burst)
+                    : (hb && in_burst && color_line)
                      ? (burst_phase ? V_BURST : -V_BURST)
                     : (hb)
                      ? V_BLANK
@@ -180,7 +181,7 @@ module apple_composite #(
     .burst_len   (BL),
     .sat         (sat),
     .hue         (hue),
-    .chroma_map  (chroma_map),
+    .i_mirror    (i_mirror),
     .chroma_short(chroma_short),
     .bright      (bright),
     .contrast    (contrast),

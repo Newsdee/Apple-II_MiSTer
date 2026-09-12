@@ -129,11 +129,11 @@ module video_pipeline (
 
   // ------------------------------------------------------------------
   // 4-preset knob selection (the ONLY place the presets live).
-  // Common to all presets: chroma_map=0, chroma_short=0, pixel_delay=0,
+  // Common to all presets: i_mirror=1 (chirality fix), chroma_short=0, pixel_delay=0,
   // luma_gain=2857, setup=0, agc=1 (all fixed inside apple_composite).
   // ------------------------------------------------------------------
   reg  [7:0] p_sat, p_hue, p_bright, p_contrast;
-  reg  [1:0] p_chroma_map;
+  reg        p_i_mirror;
   reg        p_chroma_short;
   reg  [3:0] p_smear, p_luma_delay;
   reg        p_agc;
@@ -143,7 +143,7 @@ module video_pipeline (
     p_hue        = 8'd0;
     p_bright     = 8'd0;
     p_contrast   = 8'd128;
-    p_chroma_map = 2'd0;
+    p_i_mirror   = 1'b1;
     p_chroma_short = 1'b0;
     p_smear      = 4'd0;
     p_luma_delay = 4'd0;
@@ -175,11 +175,12 @@ module video_pipeline (
     .vs(vs_c),
     .hb(HBL),
     .vb(VBL),
+    .color_line(COLOR_LINE),
     .sat(p_sat),
     .hue(p_hue),
     .bright(p_bright),
     .contrast(p_contrast),
-    .chroma_map(p_chroma_map),
+    .i_mirror(p_i_mirror),
     .chroma_short(p_chroma_short),
     .smear(p_smear),
     .luma_delay(p_luma_delay),
