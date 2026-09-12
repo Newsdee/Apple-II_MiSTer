@@ -92,7 +92,7 @@ module tb_video_pipeline_regress;
     .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
     .ioctl_addr(ioctl_addr), .ioctl_data(ioctl_data), .ioctl_index(ioctl_index),
     .ioctl_download(ioctl_download), .ioctl_wr(ioctl_wr), .ioctl_wait(dut_wait),
-    .use_composite(use_composite), .comp_preset(2'd0),
+    .use_composite(use_composite), .comp_preset(2'd0), .comp_hshift(2'd0),
     .R(dut_r), .G(dut_g), .B(dut_b),
     .HS(dut_hs), .VS(dut_vs), .HBL_O(dut_hbl), .VBL_O(dut_vbl)
   );

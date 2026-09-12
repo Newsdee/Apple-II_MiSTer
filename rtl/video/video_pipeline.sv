@@ -48,6 +48,7 @@ module video_pipeline (
   // composite switch
   input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
   input  wire [1:0]  comp_preset,    // 0=Calibrated 1=B&W 2=Punchy 3=Broken TV
+  input  wire [1:0]  comp_hshift,    // debug: composite H-shift 0-3 (on top of 3px)
   // final outputs (same names/widths vga_controller gave apple2_top)
   output wire [7:0]  R,
   output wire [7:0]  G,
@@ -194,14 +195,39 @@ module video_pipeline (
   /* verilator lint_on PINMISSING */
 
   // ------------------------------------------------------------------
+  // Composite horizontal shift (DEBUG, composite path only).
+  //
+  // The composite timing (hb/hs, derived from the decoded stream) lands a
+  // few samples off from the native vga_controller timing, so the composite
+  // picture reads as shifted and its right edge is pushed off-frame. Delay
+  // the composite TIMING by (3 + comp_hshift) cycles (RGB untouched) to
+  // slide the active window right, pulling the right-edge content into view
+  // and dropping the left margin. The native RGB path is the correctly
+  // centred reference and is never touched.
+  //
+  // comp_hshift is 0-3 from the OSD; the fixed 3px is added here. If the
+  // hardware shows the wrong direction, this is the spot to flip (delay the
+  // RGB instead, or add a line buffer for a true left-shift).
+  // ------------------------------------------------------------------
+  localparam HSHIFT_MAX = 6;  // 3 fixed + 3 knob -> 3..6 cycles
+  reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 7 stages, index 0..6
+  always @(posedge CLK_14M) begin
+    hb_c_pipe <= {hb_c_pipe[HSHIFT_MAX-1:0], hb_c_out};
+    hs_c_pipe <= {hs_c_pipe[HSHIFT_MAX-1:0], hs_c_out};
+  end
+  wire [2:0] hshift_idx = 3'd3 + comp_hshift;  // 3..6
+  wire       hb_c_s = hb_c_pipe[hshift_idx];
+  wire       hs_c_s = hs_c_pipe[hshift_idx];
+
+  // ------------------------------------------------------------------
   // Final mux. Each path drives its own consistent RGB + timing set.
   // ------------------------------------------------------------------
   assign R     = use_composite ? r_comp     : r_vga;
   assign G     = use_composite ? g_comp     : g_vga;
   assign B     = use_composite ? b_comp     : b_vga;
-  assign HS    = use_composite ? hs_c_out   : hs_vga;
+  assign HS    = use_composite ? hs_c_s     : hs_vga;
   assign VS    = use_composite ? vs_c_out   : vs_vga;
-  assign HBL_O = use_composite ? hb_c_out   : hbl_vga;
+  assign HBL_O = use_composite ? hb_c_s     : hbl_vga;
   assign VBL_O = use_composite ? vb_c_out   : vbl_vga;
 
 endmodule
