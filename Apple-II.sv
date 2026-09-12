@@ -895,7 +895,7 @@ reg [1:0]disk_mount;
 
 
 // WOZ variant: no floppy_track instances.  The hps_io SD channels 0 and 2
-// feed the WOZ drives directly through the apple2_top_woz SD ports above
+// feed the WOZ drives directly through the apple2_top SD ports above
 // (the WOZ speaks the hps_io streaming protocol natively - no track
 // buffer bridge needed).
 

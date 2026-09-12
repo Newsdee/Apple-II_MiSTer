@@ -82,6 +82,7 @@ module apple_composite #(
   input  wire [3:0]  smear,      // chroma trail length, 0 = off
   input  wire [3:0]  luma_delay, // samples (set BELOW chroma path delay)
   input  wire        agc_en,     // track level off the burst
+  input  wire        comb_en,    // vertical comb filter enable (1-line chroma average)
   output wire [7:0]  r, g, b,
   output wire        ce_out, hs_out, vs_out, hb_out, vb_out,
   // Modulated sample stream (Q2.21 volts, 1 V = 2^21), one sample per ce
@@ -190,6 +191,7 @@ module apple_composite #(
     .setup       (16'sd0),
     .luma_gain   (16'sd2857),
     .agc_en      (agc_en),
+    .comb_en     (comb_en),
     .ce_out      (ce_out),
     .hs_out      (hs_out),
     .vs_out      (vs_out),

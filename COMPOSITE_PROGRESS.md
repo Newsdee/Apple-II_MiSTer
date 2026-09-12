@@ -262,7 +262,7 @@ M1–M5 (2026-09, Woz build): `rtl/video/` created; `vga_controller.v` moved
 there; generic `apple_composite.sv` (knob ports) + `composite_decoder.sv`
 registered in `files.qip`/`Apple-II.qsf`; `video_pipeline.sv` written (switch +
 4 presets + mux, 14 MHz domain, 0 lint warnings); wired into
-`apple2_top_woz.v` + `Apple-II_woz.sv` (OSD: "Color sharpness" RGB/Composite =
+`apple2_top.v` + `Apple-II_woz.sv` (OSD: "Color sharpness" RGB/Composite =
 `status[4]`; "Composite preset" Calibrated/B&W/Punchy/Broken TV = `status[2:1]`).
 `tools/tb_video_pipeline_regress.sv`: 708,624 samples 0 mismatches (RGB path
 byte-identical) + composite sanity (full-range contrast) PASS.

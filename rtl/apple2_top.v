@@ -392,7 +392,7 @@ module apple2_top(
                 if (flash_clk[22] == 1'b1)
                     power_on_reset <= 1'b0;
 
-                flash_clk <= flash_clk + 1;
+                flash_clk <= flash_clk + 23'd1;
             end
         end
     end

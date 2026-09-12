@@ -185,6 +185,7 @@ module video_pipeline (
     .smear(p_smear),
     .luma_delay(p_luma_delay),
     .agc_en(p_agc),
+    .comb_en(NTSC_VERTICAL_COMB),
     .r(r_comp),
     .g(g_comp),
     .b(b_comp),

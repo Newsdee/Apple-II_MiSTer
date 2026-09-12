@@ -139,10 +139,9 @@ endfunction
 logic       hs_d;
 logic [9:0] hcnt;
 
-wire [10:0] burst_end = {1'b0, burst_start} + BURST_ACC;
+wire [10:0] burst_end = {1'b0, burst_start} + BURST_ACC[10:0];
 wire [10:0] clamp_beg = {1'b0, burst_start} + {1'b0, burst_len};
-wire [10:0] clamp_end = clamp_beg + CLAMP_ACC;
-
+wire [10:0] clamp_end = clamp_beg + CLAMP_ACC[10:0];
 wire in_burst = ({1'b0, hcnt} >= {1'b0, burst_start}) && ({1'b0, hcnt} <  burst_end);
 wire in_clamp = ({1'b0, hcnt} >= clamp_beg)           && ({1'b0, hcnt} <  clamp_end) && hb_in;
 wire burst_fin = ({1'b0, hcnt} == burst_end);
@@ -261,8 +260,13 @@ end
 // column, and sources whose line is a half cycle get their dot crawl, both
 // without being told which they are.
 
-logic [23:0] phase;
-always_ff @(posedge clk) if (ce) phase <= phase + PHASE_INC[23:0];
+// Only bits [23:16] of the free-running accumulator are consumed (the
+// `ph` sine index).  PHASE_INC is a power of two (2^24/SPC), so for
+// every SPC <= 256 the top 8 bits evolve exactly as an 8-bit counter
+// stepped by PHASE_INC[23:16] - which also keeps the six
+// constant-zero low bits out of the netlist at SPC=4 (Quartus 10030).
+logic [7:0] phase;
+always_ff @(posedge clk) if (ce) phase <= phase + PHASE_INC[23:16];
 
 function automatic signed [10:0] qsin(input [6:0] a);
 	case (a)
@@ -343,8 +347,7 @@ function automatic signed [10:0] sine(input [7:0] p);
 	sine = p[7] ? -v : v;
 endfunction
 
-wire [7:0] ph = phase[23:16];
-
+wire [7:0] ph = phase;
 logic signed [17:0] i_dem, q_dem;
 
 /* verilator lint_off UNUSEDSIGNAL */

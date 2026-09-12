@@ -101,7 +101,7 @@ module flux_drive (
     input  wire [31:0] FLUX_TOTAL_TICKS, // Sum of FLUX bytes for timing normalization
 
     // SD block interface for track loading (optional, for WOZ support)
-    output reg  [7:0]  SD_TRACK_REQ,    // Track number to load (pulsed)
+    output      [7:0]  SD_TRACK_REQ,    // tied 0 in this port (upstream pulse source not ported; always saw 0)
     output reg         SD_TRACK_STROBE, // Request new track load
     input  wire        SD_TRACK_ACK,    // Track load complete
 
@@ -1173,6 +1173,9 @@ module flux_drive (
     // At each bit cell boundary, we check if the current bit is 1.
     // If so, a flux transition occurs (FLUX_TRANSITION pulses high for 1 cycle).
 
+    // SD_TRACK_REQ has no other driver in this port - see port comment.
+    assign SD_TRACK_REQ = 8'd0;
+
     // Edge detection for motor-on in rotation block
     reg         prev_motor_for_position;
 
@@ -1187,7 +1190,6 @@ module flux_drive (
             prev_write_mode <= 1'b0;
             write_strobe_steal <= 1'b0;
             FLUX_TRANSITION <= 1'b0;
-            SD_TRACK_REQ <= 8'd0;
             SD_TRACK_STROBE <= 1'b0;
             current_track <= 8'd0;
             prev_motor_for_position <= 1'b0;

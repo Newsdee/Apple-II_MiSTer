@@ -61,7 +61,7 @@ function Resolve-QuartusExecutable([string]$Name) {
 Write-Step 'WOZ source selection'
 $requiredFiles = @(
     'Apple-II.sv',
-    'rtl/apple2_top_woz.v',
+    'rtl/apple2_top.v',
     'rtl/woz/disk_ii_woz.sv',
     'rtl/woz/woz_floppy_controller.sv',
     'rtl/woz/flux_drive.v',
@@ -81,7 +81,7 @@ $requiredAssignments = @(
     'rtl/woz/woz_bram.sv',
     'rtl/woz/woz_cell525.sv',
     'rtl/woz/disk_ii_rom.v',
-    'rtl/apple2_top_woz.v',
+    'rtl/apple2_top.v',
     '"Apple-II.sv"',
     'rtl/savestates/savestate_hotkeys.sv'
 )
@@ -150,7 +150,7 @@ $reportParameters = @{
 
 $mapReport = Join-Path $projectRoot 'output_files\Apple-II.map.rpt'
 if (Test-Path -LiteralPath $mapReport) {
-    $wozWarnings = Select-String -Path $mapReport -Pattern '^Warning .*?(Apple-II.sv|apple2_top_woz\.v|rtl[/\\]woz[/\\])' | ForEach-Object { $_.Line.Trim() }
+    $wozWarnings = Select-String -Path $mapReport -Pattern '^Warning .*?(Apple-II.sv|apple2_top\.v|rtl[/\\]woz[/\\])' | ForEach-Object { $_.Line.Trim() }
     if ($wozWarnings.Count -gt 0) {
         Write-Host ''
         Write-Host 'WOZ-specific Quartus warnings:' -ForegroundColor Yellow
@@ -173,7 +173,7 @@ $eolPaths = @(
     'Apple-II.sv',
     'Apple-II.qsf',
     'files.qip',
-    'rtl/apple2_top_woz.v',
+    'rtl/apple2_top.v',
     'rtl/woz/',
     'rtl/savestates/savestate_hotkeys.sv',
     'quartus_reports.ps1',
