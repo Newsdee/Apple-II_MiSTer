@@ -548,6 +548,11 @@ module apple2_top(
         .VIDEO(VIDEO),
         .HBL(HBL),
         .VBL(VBL),
+        // machine_ce low during save/load/OSD-pause: hold the composite
+        // pipeline (and its subcarrier/comb state) frozen so the frame
+        // stays put and resumes at the same color phase (see the
+        // machine_ce note in video_pipeline.sv).
+        .machine_ce(machine_ce),
         .COLOR_LINE(COLOR_LINE_CONTROL),
         .SCREEN_MODE(SCREEN_MODE),
         .COLOR_PALETTE(COLOR_PALETTE),

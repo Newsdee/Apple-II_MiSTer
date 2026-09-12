@@ -45,6 +45,16 @@ module video_pipeline (
   input  wire        ioctl_download,
   input  wire        ioctl_wr,
   output wire        ioctl_wait,
+  // Freeze the whole pipeline during a machine stall (save/load, OSD
+  // pause): while machine_ce is low the core holds HBL/VBL/VIDEO
+  // frozen but the 14 MHz domain keeps running.  If the composite path
+  // kept running it would free-run its subcarrier, synthesize phantom
+  // lines from the stuck sync, and fill the vertical comb's field RAM
+  // with garbage - the decoded hue then lands at a phase-dependent
+  // value on resume (a different hue on every save/load attempt).
+  // Gating ce freezes encoder/decoder/comb deterministically: the frame
+  // holds on screen and resumes exactly where it stopped.
+  input  wire        machine_ce,
   // composite switch
   input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
   input  wire [1:0]  comp_preset,    // 0=Calibrated 1=B&W 2=Punchy 3=Broken TV
@@ -105,20 +115,24 @@ module video_pipeline (
 
   reg [9:0] hblank_cnt;
   always @(posedge CLK_14M) begin
-    if (HBL) hblank_cnt <= hblank_cnt + 10'd1;
-    else     hblank_cnt <= 10'd0;
+    if (machine_ce) begin
+      if (HBL) hblank_cnt <= hblank_cnt + 10'd1;
+      else     hblank_cnt <= 10'd0;
+    end
   end
 
   reg         hbl_d;
   wire        hbl_rise   = HBL & ~hbl_d;
-  always @(posedge CLK_14M) hbl_d <= HBL;
+  always @(posedge CLK_14M) if (machine_ce) hbl_d <= HBL;
 
   reg [6:0]   vblank_lines;
   always @(posedge CLK_14M) begin
-    if (VBL) begin
-      if (hbl_rise) vblank_lines <= vblank_lines + 7'd1;
-    end else begin
-      vblank_lines <= 7'd0;
+    if (machine_ce) begin
+      if (VBL) begin
+        if (hbl_rise) vblank_lines <= vblank_lines + 7'd1;
+      end else begin
+        vblank_lines <= 7'd0;
+      end
     end
   end
 
@@ -168,7 +182,7 @@ module video_pipeline (
   /* verilator lint_off PINMISSING */
   apple_composite u_comp (
     .clk(CLK_14M),
-    .ce(1'b1),
+    .ce(machine_ce),
     .video(VIDEO),
     .pixel_delay(2'd0),
     .hs(hs_c),
@@ -214,8 +228,10 @@ module video_pipeline (
   localparam HSHIFT_MAX = 6;  // 3 fixed + 3 knob -> 3..6 cycles
   reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 7 stages, index 0..6
   always @(posedge CLK_14M) begin
-    hb_c_pipe <= {hb_c_pipe[HSHIFT_MAX-1:0], hb_c_out};
-    hs_c_pipe <= {hs_c_pipe[HSHIFT_MAX-1:0], hs_c_out};
+    if (machine_ce) begin
+      hb_c_pipe <= {hb_c_pipe[HSHIFT_MAX-1:0], hb_c_out};
+      hs_c_pipe <= {hs_c_pipe[HSHIFT_MAX-1:0], hs_c_out};
+    end
   end
   wire [2:0] hshift_idx = 3'd3 + comp_hshift;  // 3..6
   wire       hb_c_s = hb_c_pipe[hshift_idx];

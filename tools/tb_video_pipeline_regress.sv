@@ -33,9 +33,20 @@ module tb_video_pipeline_regress;
 
   // 1-bit video: a spatial pattern while active, 0 during blanking (the
   // real video_generator forces VIDEO=0 in HBL).
-  wire VIDEO = HBL ? 1'b0 : (hcnt[8] ^ hcnt[2] ^ lcnt[4]);
+  // Phase-3 color zone: in field 12, lcnt 100..199 the video flips at the
+  // subcarrier rate (hcnt[1] = 14M/4 = fsc) - like real 4-bit-HGR color -
+  // so the composite signal carries real chroma and a post-stall hue drift
+  // is visible in the decoded RGB.
+  wire color_zone = (field == 12) && (lcnt >= 100) && (lcnt < 200) && !HBL;
+  wire VIDEO = HBL ? 1'b0 : color_zone ? hcnt[1] : (hcnt[8] ^ hcnt[2] ^ lcnt[4]);
+
+  // machine_ce: models the savestate manager / OSD-pause machine enable.
+  // Low = the core's timing generator holds HBL/VBL/VIDEO frozen while the
+  // 14 MHz domain keeps running (the real save/load behavior).
+  reg machine_ce = 1'b1;
 
   always @(posedge CLK) begin
+    if (machine_ce) begin
     if (hcnt == LINE_LEN - 1) begin
       hcnt <= 0;
       if (lcnt == FIELD_LINES - 1) begin
@@ -46,6 +57,7 @@ module tb_video_pipeline_regress;
       end
     end else begin
       hcnt <= hcnt + 1;
+    end
     end
   end
 
@@ -86,6 +98,7 @@ module tb_video_pipeline_regress;
   wire dut_hs, dut_vs, dut_hbl, dut_vbl, dut_wait;
   video_pipeline dut (
     .CLK_14M(CLK), .VIDEO(VIDEO), .HBL(HBL), .VBL(VBL),
+    .machine_ce(machine_ce),
     .COLOR_LINE(COLOR_LINE), .SCREEN_MODE(SCREEN_MODE), .COLOR_PALETTE(COLOR_PALETTE),
     .GRAY_SEAM_FIX(GRAY_SEAM_FIX), .SEAM_RUN_FILL(SEAM_RUN_FILL),
     .SEAM_RUN_WIDE(SEAM_RUN_WIDE), .RUN_FILL_OK(RUN_FILL_OK),
@@ -96,6 +109,42 @@ module tb_video_pipeline_regress;
     .R(dut_r), .G(dut_g), .B(dut_b),
     .HS(dut_hs), .VS(dut_vs), .HBL_O(dut_hbl), .VBL_O(dut_vbl)
   );
+
+  // Phase-3 monitors: (a) while machine_ce is low the DUT outputs must not
+  // change at all (frozen frame, no phantom lines); (b) the decoded R/G/B at
+  // the same fixed pixel before and after the stall must be identical (no
+  // hue drift of the free-running subcarrier/phase accumulator).
+  integer     stall_changes = 0;
+  logic [7:0] hold_r, hold_g, hold_b;
+  logic       hold_hs, hold_vs, hold_armed;
+  logic [7:0] pre_r, pre_g, pre_b, post_r, post_g, post_b;
+  logic       pre_captured, post_captured;
+
+  always @(posedge CLK) begin
+    if (!machine_ce) begin
+      if (hold_armed) begin
+        if (hold_r !== dut_r || hold_g !== dut_g || hold_b !== dut_b ||
+            hold_hs !== dut_hs || hold_vs !== dut_vs)
+          stall_changes = stall_changes + 1;
+      end else
+        hold_armed <= 1'b1;
+      hold_r <= dut_r; hold_g <= dut_g; hold_b <= dut_b;
+      hold_hs <= dut_hs; hold_vs <= dut_vs;
+    end else begin
+      hold_armed <= 1'b0;
+      hold_r <= dut_r; hold_g <= dut_g; hold_b <= dut_b;
+      hold_hs <= dut_hs; hold_vs <= dut_vs;
+    end
+
+    if (use_composite && field == 12 && lcnt == 120 && hcnt == 600) begin
+      pre_r <= dut_r; pre_g <= dut_g; pre_b <= dut_b;
+      pre_captured <= 1'b1;
+    end
+    if (use_composite && field == 12 && lcnt == 180 && hcnt == 600) begin
+      post_r <= dut_r; post_g <= dut_g; post_b <= dut_b;
+      post_captured <= 1'b1;
+    end
+  end
 
   // Compare every active-field sample, after the first field (X settling).
   integer mismatches = 0;
@@ -151,6 +200,27 @@ module tb_video_pipeline_regress;
       $display("PASS (composite path produces contrast)");
     else
       $display("FAIL (composite path trivial/constant)");
+
+    // Phase 3: machine_ce stall (save/load model). The core's timing
+    // generator holds HBL/VBL/VIDEO frozen while the 14 MHz domain keeps
+    // running; the composite pipeline must freeze with it and resume at the
+    // same color phase.
+    wait (field == 12 && lcnt == 150 && hcnt == 500);
+    machine_ce = 1'b0;
+    repeat (12345) @(posedge CLK);  // 12345 % 4 = 1: 90-degree drift if unfixed
+    machine_ce = 1'b1;
+    wait (post_captured);
+    repeat (1) @(posedge CLK);
+    $display("=== video_pipeline stall-hold + hue-hold (machine_ce low) ===");
+    $display("stall_changes=%0d (want 0)  pre R%02X G%02X B%02X  post R%02X G%02X B%02X",
+             stall_changes, pre_r, pre_g, pre_b, post_r, post_g, post_b);
+    begin : stall_check
+      logic ok;
+      ok = (pre_captured === 1'b1) && (stall_changes == 0) &&
+           (pre_r === post_r && pre_g === post_g && pre_b === post_b);
+      if (ok) $display("PASS (frame holds during stall; hue preserved)");
+      else $display("FAIL (outputs moved during stall or hue changed)");
+    end
     $finish;
   end
 
