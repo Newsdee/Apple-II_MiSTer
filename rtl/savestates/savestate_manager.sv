@@ -1,4 +1,4 @@
-module savestate_manager_l1b (
+module savestate_manager (
   input  wire        clk,
   input  wire        reset,
   input  wire        request_save,

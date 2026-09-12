@@ -60,7 +60,7 @@ function Resolve-QuartusExecutable([string]$Name) {
 
 Write-Step 'WOZ source selection'
 $requiredFiles = @(
-    'Apple-II_woz.sv',
+    'Apple-II.sv',
     'rtl/apple2_top_woz.v',
     'rtl/woz/disk_ii_woz.sv',
     'rtl/woz/woz_floppy_controller.sv',
@@ -68,7 +68,7 @@ $requiredFiles = @(
     'rtl/woz/woz_bram.sv',
     'rtl/woz/woz_cell525.sv',
     'rtl/woz/disk_ii_rom.v',
-    'rtl/savestate_hotkeys.sv'
+    'rtl/savestates/savestate_hotkeys.sv'
 )
 foreach ($relativePath in $requiredFiles) {
     Assert-True (Test-Path -LiteralPath (Join-Path $projectRoot $relativePath)) "Missing required WOZ file: $relativePath"
@@ -82,20 +82,19 @@ $requiredAssignments = @(
     'rtl/woz/woz_cell525.sv',
     'rtl/woz/disk_ii_rom.v',
     'rtl/apple2_top_woz.v',
-    '"Apple-II_woz.sv"',
-    'rtl/savestate_hotkeys.sv'
+    '"Apple-II.sv"',
+    'rtl/savestates/savestate_hotkeys.sv'
 )
 $forbiddenAssignments = @(
     'rtl/disk_ii.v',
     'rtl/drive_ii.v',
     'rtl/floppy_track.sv',
-    'rtl/apple2_top.v',
-    '"Apple-II.sv"'
+    'rtl/apple2_top.v'
 )
 foreach ($sourceList in @('files.qip', 'Apple-II.qsf')) {
     $text = [IO.File]::ReadAllText((Join-Path $projectRoot $sourceList), [Text.Encoding]::UTF8)
     foreach ($assignment in $requiredAssignments) {
-        Assert-True $text.Contains($assignment) "$sourceList is missing '$assignment'. Run toggle_woz.ps1 woz."
+        Assert-True $text.Contains($assignment) "$sourceList is missing '$assignment'. WOZ source selection expected."
     }
     foreach ($assignment in $forbiddenAssignments) {
         Assert-True (-not $text.Contains($assignment)) "$sourceList still contains Disk II assignment '$assignment'."
@@ -151,7 +150,7 @@ $reportParameters = @{
 
 $mapReport = Join-Path $projectRoot 'output_files\Apple-II.map.rpt'
 if (Test-Path -LiteralPath $mapReport) {
-    $wozWarnings = Select-String -Path $mapReport -Pattern '^Warning .*?(Apple-II_woz\.sv|apple2_top_woz\.v|rtl[/\\]woz[/\\])' | ForEach-Object { $_.Line.Trim() }
+    $wozWarnings = Select-String -Path $mapReport -Pattern '^Warning .*?(Apple-II.sv|apple2_top_woz\.v|rtl[/\\]woz[/\\])' | ForEach-Object { $_.Line.Trim() }
     if ($wozWarnings.Count -gt 0) {
         Write-Host ''
         Write-Host 'WOZ-specific Quartus warnings:' -ForegroundColor Yellow
@@ -171,12 +170,12 @@ Assert-True (Test-Path -LiteralPath $bashPath) "MSYS2 bash not found: $bashPath"
 $workspaceRootMsys = Convert-ToMsysPath $workspaceRoot
 $projectRootMsys = Convert-ToMsysPath $projectRoot
 $eolPaths = @(
-    'Apple-II_woz.sv',
+    'Apple-II.sv',
     'Apple-II.qsf',
     'files.qip',
     'rtl/apple2_top_woz.v',
     'rtl/woz/',
-    'rtl/savestate_hotkeys.sv',
+    'rtl/savestates/savestate_hotkeys.sv',
     'quartus_reports.ps1',
     'validate_woz.ps1',
     'validate_woz.bat'

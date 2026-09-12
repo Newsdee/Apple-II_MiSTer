@@ -61,8 +61,8 @@ video_freak video_freak
 parameter CONF_STR = {
 	"Apple-II;SS3E000000:200000,UART19200:9600:4800:2400:1200:300;",
 	"-;",
-	"S0,NIBDSKDO PO ;",
-	"S2,NIBDSKDO PO ;",
+	"S0,NIBDSKDO PO WOZ,Drive 1;",
+	"S2,NIBDSKDO PO WOZ,Drive 2;",
 	"OQR,Write Protect,None,Drive 1,Drive 2,Drive 1 & 2;",
 	"-;",
 	"S1,HDV;",
@@ -87,6 +87,8 @@ parameter CONF_STR = {
 	"P2OG,Pixel Clock,Double,Normal;",
 	"P2OL,Lo-Res Text,Clean,Composite;",
 	"P2O4,Color sharpness,RGB,Composite;",
+	"P2O12,Composite preset,Calibrated,B&W,Punchy,Broken TV;",
+	"P2oUV,Comp H-Shift,0,1,2,3;",
 	"P2o0,NTSC vertical blend,On,Off;",
 	"P2-;",	
 	"P2O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;", 
@@ -103,7 +105,8 @@ parameter CONF_STR = {
 	"P3o7,Joystick mode,Absolute,Relative;",
 	"P3-;",	
 	"P3o3,Disk LED overlay,Yes,No;",
-	"P3o12,Disk drive sound,Off,On (1x),On (2x),On (4x);",
+	// Disk drive sound: disabled in the WOZ variant (the flux drives expose
+	// no motor/step signals; the floppy_sound instance is tied off below).
 	"P3-;",
 	"P4,Virtual keyboard;",
 	"P4-;",
@@ -130,7 +133,7 @@ parameter CONF_STR = {
 	"jp,Y|P,B;",
 	// Save-state info strings (index 0 is the "I" marker): 1-4 active slot,
 	// 5-12 "State N saved/loaded" (5 + 2*slot + load), 13 Saturn, 14 invalid,
-	// 15 incompatible. Driven on hps_io.info by rtl/savestate_ui.sv.
+	// 15 incompatible. Driven on hps_io.info by rtl/savestates/savestate_ui.sv.
 	"I,",
 	"Active slot 1,",
 	"Active slot 2,",
@@ -414,7 +417,7 @@ wire [63:0] slot_wdata;
 wire [63:0] slot_rdata;
 wire        slot_ready;
 
-// Save-state UI (OSD page, hotkeys, feedback) - see rtl/savestate_ui.sv.
+// Save-state UI (OSD page, hotkeys, feedback) - see rtl/savestates/savestate_ui.sv.
 wire [1:0]  ss_error_code;
 wire        ui_save_req;
 wire        ui_load_req;
@@ -503,6 +506,9 @@ apple2_top apple2_top
 	.TEXT_COLOR( text_color ),
 	.COLOR_PALETTE(status[25:24]),
 	.GRAY_SEAM_FIX(~status[4]),
+	.use_composite(status[4]),
+	.comp_preset(status[2:1]),
+	.comp_hshift(status[63:62]),
 	.SEAM_RUN_FILL(1'b1),
 	.SEAM_RUN_WIDE(1'b0),
 	.NTSC_VERTICAL_COMB(~status[32]),
@@ -529,19 +535,27 @@ apple2_top apple2_top
 	// keystrokes at the same time. The raw joystick (gameport) is unaffected.
 	.JOY_TO_KEY_EN(status[43] && !virtual_keyboard_enabled),
 	
-	.TRACK1(TRACK1),
-	.TRACK1_ADDR(TRACK1_RAM_ADDR),
-	.TRACK1_DI(TRACK1_RAM_DI),
-	.TRACK1_DO (TRACK1_RAM_DO),
-	.TRACK1_WE (TRACK1_RAM_WE),
-	.TRACK1_BUSY (TRACK1_RAM_BUSY),
-	//-- Track buffer interface disk 2
-	.TRACK2(TRACK2),
-	.TRACK2_ADDR(TRACK2_RAM_ADDR),
-	.TRACK2_DI(TRACK2_RAM_DI),
-	.TRACK2_DO (TRACK2_RAM_DO),
-	.TRACK2_WE (TRACK2_RAM_WE),
-	.TRACK2_BUSY (TRACK2_RAM_BUSY),
+	// WOZ SD block interface: hps_io channel 0 -> drive 1, channel 2 ->
+	// drive 2 (channel 1 stays the HDD).  hps_io's streaming protocol is
+	// exactly what the WOZ expects; sd_blk_cnt is left unconnected (0 =
+	// single-block requests, which is all the WOZ issues).
+	.SD_LBA0(sd_lba[0]),
+	.SD_RD0(sd_rd[0]),
+	.SD_WR0(sd_wr[0]),
+	.SD_ACK0(sd_ack[0]),
+	.SD_BUFF_DIN0(sd_buff_din[0]),
+	.SD_LBA1(sd_lba[2]),
+	.SD_RD1(sd_rd[2]),
+	.SD_WR1(sd_wr[2]),
+	.SD_ACK1(sd_ack[2]),
+	.SD_BUFF_DIN1(sd_buff_din[2]),
+	.SD_BUFF_ADDR(sd_buff_addr),
+	.SD_BUFF_DOUT(sd_buff_dout),
+	.SD_BUFF_WR(sd_buff_wr),
+	.IMG_MOUNTED0(disk_mount[0]),
+	.IMG_MOUNTED1(disk_mount[1]),
+	.IMG_READONLY(img_readonly),
+	.IMG_SIZE(img_size),
 
 	.DISK_READY(DISK_READY),
 	.D1_ACTIVE(D1_ACTIVE),
@@ -618,20 +632,24 @@ wire [7:0] virtual_font_data;
 wire virtual_font_alternate;
 wire virtual_font_lowercase;
 
+// Floppy drive sound: DISABLED in the WOZ variant (user decision,
+// 2026-09-08) - the flux drives expose no motor/step/track-zero signals.
+// The instance is kept with all motion inputs tied off so it can be
+// re-enabled trivially; it contributes silence.
 floppy_sound floppy_sound
 (
 	.clk(clk_sys),
 	.reset(RESET | status[0] | buttons[1] | virtual_keyboard_reset | soft_reset),
-	.enable(status[34:33] != 2'd0),
-	.gain(status[34:33] - 2'd1),
-	.drive1_motor(D1_MOTOR_ON),
-	.drive2_motor(D2_MOTOR_ON),
-	.drive1_io(D1_IO_ACTIVE),
-	.drive2_io(D2_IO_ACTIVE),
-	.drive1_step(D1_STEP_ACTIVE),
-	.drive2_step(D2_STEP_ACTIVE),
-	.drive1_track_zero_step(D1_TRACK_ZERO_STEP),
-	.drive2_track_zero_step(D2_TRACK_ZERO_STEP),
+	.enable(1'b0),
+	.gain(2'd0),
+	.drive1_motor(1'b0),
+	.drive2_motor(1'b0),
+	.drive1_io(1'b0),
+	.drive2_io(1'b0),
+	.drive1_step(1'b0),
+	.drive2_step(1'b0),
+	.drive1_track_zero_step(1'b0),
+	.drive2_track_zero_step(1'b0),
 	.sample(floppy_audio)
 );
 
@@ -644,9 +662,9 @@ drive_status_overlay drive_status_overlay
 	.vblank(VBlank),
 	.rgb_in({core_R, core_G, core_B}),
 	.drive1_motor(D1_ACTIVE),
-	.drive1_activity(D1_IO_ACTIVE),
+	.drive1_activity(sd_rd[0] | sd_wr[0]),	// WOZ: activity = SD traffic
 	.drive2_motor(D2_ACTIVE),
-	.drive2_activity(D2_IO_ACTIVE),
+	.drive2_activity(sd_rd[2] | sd_wr[2]),
 	.hdd_mounted(hdd_mounted),
 	.hdd_activity(hdd_read | hdd_write),
 	.rgb_out(drive_overlay_rgb)
@@ -777,7 +795,7 @@ savestate_ui savestate_ui (
 	.status_menumask(ss_menumask)
 );
 
-savestate_manager_l1b state_manager (
+savestate_manager state_manager (
 	.clk(clk_sys), .reset(dd_reset),
 	.request_save(ui_save_req), .request_load(ui_load_req),
 	.allow_save_state(!saturn_5_inslot),
@@ -791,7 +809,7 @@ savestate_manager_l1b state_manager (
 	.slot_wdata(slot_wdata), .slot_rdata(slot_rdata), .slot_ready(slot_ready)
 );
 
-savestate_ddr_l1b #(.BASE_ADDR(29'h07C00000)) ddr_ss (
+savestate_ddr #(.BASE_ADDR(29'h07C00000)) ddr_ss (
 	.clk(clk_sys), .reset(dd_reset),
 	.slot_addr(slot_addr), .slot_sel(ui_ss_slot), .slot_rd(slot_rd), .slot_wr(slot_wr),
 	.slot_wdata(slot_wdata), .slot_rdata(slot_rdata), .slot_ready(slot_ready),
@@ -854,19 +872,16 @@ always @(posedge clk_sys) begin
 end
 
 
+// WOZ IMG_MOUNTED levels: latch the one-cycle hps_io mount pulse into a
+// level (img_size != 0 = disk present).  The WOZ takes IMG_MOUNTED as a
+// LEVEL that stays high while the image is mounted.
 always @(posedge clk_sys) begin
-	if (img_mounted[0]) begin
+	if (img_mounted[0])
 		disk_mount[0] <= img_size != 0;
-		DISK_CHANGE[0] <= ~DISK_CHANGE[0];
-		//disk_protect <= img_readonly;
-	end
 end
 always @(posedge clk_sys) begin
-	if (img_mounted[2]) begin
+	if (img_mounted[2])
 		disk_mount[1] <= img_size != 0;
-		DISK_CHANGE[1] <= ~DISK_CHANGE[1];
-		//disk_protect <= img_readonly;
-	end
 end
 	
 wire D1_ACTIVE,D2_ACTIVE;
@@ -874,82 +889,15 @@ wire D1_MOTOR_ON,D2_MOTOR_ON;
 wire D1_IO_ACTIVE,D2_IO_ACTIVE;
 wire D1_STEP_ACTIVE,D2_STEP_ACTIVE;
 wire D1_TRACK_ZERO_STEP,D2_TRACK_ZERO_STEP;
-wire TRACK1_RAM_BUSY;
-wire [12:0] TRACK1_RAM_ADDR;
-wire [7:0] TRACK1_RAM_DI;
-wire [7:0] TRACK1_RAM_DO;
-wire TRACK1_RAM_WE;
-wire [5:0] TRACK1;
-
-wire TRACK2_RAM_BUSY;
-wire [12:0] TRACK2_RAM_ADDR;
-wire [7:0] TRACK2_RAM_DI;
-wire [7:0] TRACK2_RAM_DO;
-wire TRACK2_RAM_WE;
-wire [5:0] TRACK2;
-
-wire [1:0] DISK_READY;
-reg [1:0] DISK_CHANGE;
+wire [1:0] DISK_READY;	// unused in WOZ mode (no track buffer)
 reg [1:0]disk_mount;
 
 
 
-floppy_track floppy_track_1
-(
-   .clk(clk_sys),
-   .reset(dd_reset),
-	
-   .ram_addr(TRACK1_RAM_ADDR),
-   .ram_di(TRACK1_RAM_DI),
-   .ram_do(TRACK1_RAM_DO),
-   .ram_we(TRACK1_RAM_WE),
-	
-   .track (TRACK1),
-   .busy  (TRACK1_RAM_BUSY),
-   .change(DISK_CHANGE[0]),
-   .mount (disk_mount[0]),
-   .ready  (DISK_READY[0]),
-   .active (D1_ACTIVE),
-
-   .sd_buff_addr (sd_buff_addr),
-   .sd_buff_dout (sd_buff_dout),
-   .sd_buff_din  (sd_buff_din[0]),
-   .sd_buff_wr   (sd_buff_wr),
-
-   .sd_lba       (sd_lba[0] ),
-   .sd_rd        (sd_rd[0]),
-   .sd_wr       ( sd_wr[0]),
-   .sd_ack       (sd_ack[0])	
-);
-
-
-floppy_track floppy_track_2
-(
-   .clk(clk_sys),
-   .reset(dd_reset),
-	
-   .ram_addr(TRACK2_RAM_ADDR),
-   .ram_di(TRACK2_RAM_DI),
-   .ram_do(TRACK2_RAM_DO),
-   .ram_we(TRACK2_RAM_WE),
-	
-   .track (TRACK2),
-   .busy  (TRACK2_RAM_BUSY),
-   .change(DISK_CHANGE[1]),
-   .mount (disk_mount[1]),
-   .ready  (DISK_READY[1]),
-   .active (D2_ACTIVE),
-
-   .sd_buff_addr (sd_buff_addr),
-   .sd_buff_dout (sd_buff_dout),
-   .sd_buff_din  (sd_buff_din[2]),
-   .sd_buff_wr   (sd_buff_wr),
-
-   .sd_lba       (sd_lba[2] ),
-   .sd_rd        (sd_rd[2]),
-   .sd_wr       ( sd_wr[2]),
-   .sd_ack       (sd_ack[2])	
-);
+// WOZ variant: no floppy_track instances.  The hps_io SD channels 0 and 2
+// feed the WOZ drives directly through the apple2_top_woz SD ports above
+// (the WOZ speaks the hps_io streaming protocol natively - no track
+// buffer bridge needed).
 
 
 wire tape_adc, tape_adc_act;

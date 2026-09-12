@@ -1,4 +1,4 @@
-module savestate_ddr_l1b #(
+module savestate_ddr #(
   parameter [28:0] BASE_ADDR = 29'd0
 ) (
   input  wire        clk,

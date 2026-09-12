@@ -50,7 +50,7 @@ module tb_video_pipeline_regress;
   end
 
   // Fixed, typical color-mode control.
-  wire        COLOR_LINE = 1'b0;
+  wire        COLOR_LINE = 1'b1;  // color on: exercises the burst (phase 2)
   wire [1:0]  SCREEN_MODE   = 2'b00;  // color
   wire [1:0]  COLOR_PALETTE = 2'b00;
   wire        GRAY_SEAM_FIX  = 1'b1;
