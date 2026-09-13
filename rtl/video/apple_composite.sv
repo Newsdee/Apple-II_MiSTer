@@ -5,7 +5,7 @@
 // Generic composite module for the newsdee core: the encoder knobs
 // (sat/hue/bright/contrast/pixel_delay) and the decoder knobs (i_mirror,
 // chroma_short, smear, luma_delay, agc_en) are all exposed as inputs. The
-// 4-preset mapping (Calibrated/B&W/Punchy/Broken TV) is driven from outside
+// 4-preset mapping (Calibrated/Eyeballed/Punchy/Muted) is driven from outside
 // (video_pipeline.sv), which keeps this module preset-free. The r/g/b
 // outputs are the decoder's RGB (loopback); comp_sample is the raw encoder
 // output (unused by the core, kept for testability).
@@ -83,6 +83,7 @@ module apple_composite #(
   input  wire [3:0]  luma_delay, // samples (set BELOW chroma path delay)
   input  wire        agc_en,     // track level off the burst
   input  wire        comb_en,    // vertical comb filter enable (1-line chroma average)
+  input  wire [3:0]  luma_sharpen, // horizontal luma unsharp (0=off); color lines only
   output wire [7:0]  r, g, b,
   output wire        ce_out, hs_out, vs_out, hb_out, vb_out,
   // Modulated sample stream (Q2.21 volts, 1 V = 2^21), one sample per ce
@@ -129,9 +130,25 @@ module apple_composite #(
   // (912 = 4 * 228) so its phase relative to the active video is identical
   // on every line.
   // ------------------------------------------------------------------
+  // Re-anchor at the derived hs fall (the same edge hcnt resets on): a
+  // LOAD resumes the machine from the SAVED HBL position, and the
+  // free-running burst phase would keep its frozen value - misaligned to
+  // the core's HBL by an arbitrary 0..3 subcarrier samples (0/90/180/
+  // 270-degree phase rotation = hue rotation). BURST_PHASE_HS_FALL is
+  // the value the free-run holds at that edge during normal operation
+  // (tb_video_pipeline_regress phase 2.5; board-identical per
+  // tb_hbl_pwrup: the steady-state line grid sits on a multiple of 912
+  // from power-on and 912 % 4 == 0), so normal operation stays
+  // bit-identical and a post-load misalignment snaps back within one
+  // line.
+  localparam [1:0] BURST_PHASE_HS_FALL = 2'b11;
   logic [1:0] burst_cnt;
-  always @(posedge clk)
-    if (ce) burst_cnt <= burst_cnt + 2'd1;
+  always @(posedge clk) begin
+    if (ce) begin
+      if (hs_d && ~hs) burst_cnt <= BURST_PHASE_HS_FALL;
+      else             burst_cnt <= burst_cnt + 2'd1;
+    end
+  end
 
   wire burst_phase = burst_cnt[1];   // two samples high, two samples low
 
@@ -192,6 +209,8 @@ module apple_composite #(
     .luma_gain   (16'sd2857),
     .agc_en      (agc_en),
     .comb_en     (comb_en),
+    .color_line  (color_line),
+    .luma_sharpen(luma_sharpen),
     .ce_out      (ce_out),
     .hs_out      (hs_out),
     .vs_out      (vs_out),

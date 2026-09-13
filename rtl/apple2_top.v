@@ -62,6 +62,7 @@ module apple2_top(
     use_composite,
     comp_preset,
     comp_hshift,
+    comp_hue_adj,
     PALMODE,
     ROMSWITCH,
     PS2_Key,
@@ -186,12 +187,13 @@ module apple2_top(
     input         NTSC_VERTICAL_COMB;
     // Composite video switch (see rtl/video/video_pipeline.sv).
     //   use_composite: "Color sharpness" RGB/Composite (Apple-II_woz status[4]).
-    //   comp_preset:   0=Calibrated 1=B&W 2=Punchy 3=Broken TV (status[2:1]).
+    //   comp_preset:   0=Calibrated 1=Eyeballed 2=Punchy 3=Muted (status[2:1]).
     //   comp_hshift:   debug composite H-shift 0-3, on top of a fixed 3px
     //                  (status[63:62], P2Ouv). Composite path only.
     input         use_composite;
     input  [1:0]  comp_preset;
     input  [1:0]  comp_hshift;
+    input  [4:0]  comp_hue_adj;
     input         PALMODE;		// PAL/NTSC selection
     input         ROMSWITCH;
 
@@ -571,6 +573,7 @@ module apple2_top(
         .use_composite(use_composite),
         .comp_preset(comp_preset),
         .comp_hshift(comp_hshift),
+        .comp_hue_adj(comp_hue_adj),
         .R(r),
         .G(g),
         .B(b),

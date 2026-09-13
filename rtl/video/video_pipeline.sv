@@ -11,7 +11,7 @@
 //   * Composite (use_composite = 1): apple_composite encodes the 1-bit
 //     video to an NTSC composite stream in THIS 14 MHz domain, and its
 //     loopback decoder turns it back to RGB. The 4-preset `case`
-//     (Calibrated / B&W / Punchy / Broken TV) selects the decoder knobs.
+//     (Calibrated / Eyeballed / Punchy / Muted) selects the decoder knobs.
 //     No knobs are exposed outside this module.
 //
 // The composite path runs in the 14 MHz domain (one sample per clock), the
@@ -57,8 +57,9 @@ module video_pipeline (
   input  wire        machine_ce,
   // composite switch
   input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
-  input  wire [1:0]  comp_preset,    // 0=Calibrated 1=B&W 2=Punchy 3=Broken TV
+  input  wire [1:0]  comp_preset,    // 0=Calibrated 1=Eyeballed 2=Punchy 3=Muted
   input  wire [1:0]  comp_hshift,    // debug: composite H-shift 0-3 (on top of 3px)
+  input  wire [4:0]  comp_hue_adj,   // debug: composite hue adjust 0-31 (added to base hue)
   // final outputs (same names/widths vga_controller gave apple2_top)
   output wire [7:0]  R,
   output wire [7:0]  G,
@@ -150,9 +151,10 @@ module video_pipeline (
   reg        p_i_mirror;
   reg        p_chroma_short;
   reg  [3:0] p_smear, p_luma_delay;
+  reg  [3:0] p_luma_sharpen;
   reg        p_agc;
   always @* begin
-    // defaults = Calibrated
+    // defaults = neutral base (Punchy = base + hue); each preset overrides
     p_sat        = 8'd128;
     p_hue        = 8'd0;
     p_bright     = 8'd0;
@@ -161,12 +163,13 @@ module video_pipeline (
     p_chroma_short = 1'b0;
     p_smear      = 4'd0;
     p_luma_delay = 4'd0;
+    p_luma_sharpen = 4'd0;  // experimental horizontal luma unsharp; off by default
     p_agc        = 1'b1;
     case (comp_preset)
-      2'd0:      begin end                         // Calibrated (defaults)
-      2'd1:      begin p_sat = 8'd0;    end        // B&W
-      2'd2:      begin p_hue = 8'd144;  end        // Punchy
-      2'd3:      begin p_smear = 4'd12; end        // Broken TV
+      2'd0: begin p_sat=8'd80;  p_hue=8'd115; p_bright=8'hF2; p_contrast=8'd177; end   // Calibrated (hardware-tuned; hue=112 base +3)
+      2'd1: begin p_sat=8'd51;  p_hue=8'd128;  p_bright=8'sd10; p_contrast=8'd170; end  // Eyeballed (hardware-tuned)
+      2'd2: begin p_sat=8'd100; p_hue=8'd130; p_bright=8'sd9; p_contrast=8'd255; end   // Punchy (AppleWin-like)
+      2'd3: begin p_sat=8'd80;  p_hue=8'd112;  p_bright=8'hFB; p_contrast=8'd190; end   // Muted (Eyeballed, sat=80)
       default:   begin end
     endcase
   end
@@ -191,7 +194,7 @@ module video_pipeline (
     .vb(VBL),
     .color_line(COLOR_LINE),
     .sat(p_sat),
-    .hue(p_hue),
+    .hue(p_hue + comp_hue_adj),
     .bright(p_bright),
     .contrast(p_contrast),
     .i_mirror(p_i_mirror),
@@ -200,6 +203,7 @@ module video_pipeline (
     .luma_delay(p_luma_delay),
     .agc_en(p_agc),
     .comb_en(NTSC_VERTICAL_COMB),
+    .luma_sharpen(p_luma_sharpen),
     .r(r_comp),
     .g(g_comp),
     .b(b_comp),

@@ -1,6 +1,6 @@
 # Composite video — progress / handoff
 
-Last updated: 2026-09-12. Branch `woz-disk-support` (FPGA repo `Apple-II_MiSTer/`),
+Last updated: 2026-09-13. Branch `woz-disk-support` (FPGA repo `Apple-II_MiSTer/`),
 verilog repo `Apple-II-Verilog_MiSTer/` on `master`.
 
 **Status in one paragraph:** the NTSC composite encode→decode path is integrated,
@@ -90,6 +90,178 @@ should be a conscious decision, not a default.
 
 ---
 
+## DONE — horizontal luma sharpen + comb-gate (2026-09-13)
+
+Experimental, **off by default** (no OSD knob exposed in the core; `p_luma_sharpen=0`
+in all presets). Two changes, both gated by `color_line` so the color-killed
+(monochrome) path stays bit-identical:
+
+- **Horizontal luma unsharp** (`luma_sharpen[3:0]`, 0=off): a 1-tap unsharp mask
+  `y + amt*(y - y[-1])` on the final luma, counteracting the decoder's horizontal
+  subcarrier-reject low-pass (the "softness"). One register of history (no line RAM);
+  vertical sharpen is deliberately out of scope. Clamped back to 18-bit luma range
+  before the `<<8`, so the I/Q mix datapath is untouched.
+- **Comb gated by `color_line`**: the two-line chroma comb (`comb_en`, driven by the
+  existing "vertical blend" OSD option) is now `(comb_en && color_line)` — on
+  color-killed lines there is no chroma to blend, so it is disabled there.
+
+Bench: GUI slider + `--comp-luma-sharpen`/`--comp-color-line` CLI; verified
+(color-on 0-vs-8 differ, color-off 0-vs-8 identical = gate works); smoke 28/28,
+hash unchanged (default off). FPGA: decoder/wrapper/pipeline wired (CRLF, `perl
+:raw`); regression 708,624/0 (native path unchanged) + composite contrast. NOTE: the
+FPGA decoder keeps its 8-bit `phase` optimization (Quartus 10030) — it is NOT
+byte-identical to the bench (24-bit `phase`); behavior-identical for SPC=4.
+
+---
+
+## DONE — composite hue-adjust OSD knob + base hue rework (2026-09-13)
+
+The composite hue is now **base 112 + a temporary 5-bit OSD adjust** (0-31),
+effective range 112-143. Mirrors a real display's hue control: the user
+dials the color in on the OSD (or previews it on the bench GUI first).
+
+- **Base hue 144 -> 112** in all four presets (`video_pipeline.sv`).
+- **New OSD option `P2oPT,Comp Hue Adj`** = `status[61:57]` (5 bits, 32 values
+  0-31), at the high end of the status word next to the temp `P2oUV` Comp
+  H-Shift. **Temporary — remove with the H-Shift when done.**
+- **Effective hue = `p_hue + comp_hue_adj`** (`video_pipeline.sv`), wired
+  Apple-II.sv -> apple2_top.v -> video_pipeline -> apple_composite.
+- The bench `--comp-hue` slider already previews any hue, so the value can be
+  dialed in on the GUI before setting the OSD knob.
+
+Regression: 708,624/0 (native path unchanged) + composite contrast + stall-hold
+(hue preserved). EOL clean (numstat == EOL-insensitive numstat). NOTE: hue is
+phase-dependent on the input signal; the "correct" value is set on hardware
+(Jungle Hunt green ~144 => knob ~32) or on the bench with a correctly-phased
+test image.
+
+---
+
+## DONE — OSD reorg: display options on page 0 + gray-out by Display Type (2026-09-13)
+
+Consolidated the color/display OSD options on the top-level page and made the
+palette / TV-preset options gray out when they don't apply to the active
+Display Type. All edits are OSD-menu-only (`Apple-II.sv` CONF_STR + one
+`status_menumask` bit); **status bits and signals are unchanged**.
+
+**Page 0 (top level), final order:**
+1. `Display Type` — RGB Monitor / Color TV  (`P0O4`, status[4]; was "Color sharpness" on page 2)
+2. `RGB palette` — NTSC //e / IIgs / AppleWin / Custom  (`OOP`->`P0OOP`, status[25:24]; was "Color palette")
+3. `Color TV Preset` — Calibrated / Eyeballed / Punchy / Muted  (`P0O12`, status[2:1]; moved from page 2, was "Composite preset")
+
+**Moved to Audio & Video (page 2)** to free the main panel: `Display Mode`
+(Color/B&W/Green/Amber, `P2OJK`, status[20:19]; was "Display") and `Custom
+Palette` (function, `P2FC2`).
+
+**Gray-out (MiSTer OSD D/d flag + `status_menumask`):**
+- `status_menumask` bit 0 (free; savestate owns 7-8) = `status[4]` (Display Type).
+- `RGB palette` prefixed `D0` -> grayed in Color TV mode; `Color TV Preset`
+  prefixed `d0` -> grayed in RGB Monitor mode.
+- The D/d flag goes **first on the line, before the `P0` token** (the
+  verified-correct position; a misplaced flag silently shifts the whole page —
+  see `docs/SAVESTATE_INTEGRATION_PLAN.md`).
+- Caveat: D/d is a miosd (host) feature — not simulatable in Verilator; needs a
+  Quartus recompile + hardware look to confirm the gray-out.
+
+**Preset values (hardware-tuned; bench GUI buttons match `sim_gui.cpp`):**
+
+| Preset | Sat | Hue | Bright | Contrast |
+|--------|-----|-----|--------|----------|
+| Calibrated | 80 | 115 (112+3) | -14 | 177 |
+| Eyeballed | 51 | 128 | +10 | 170 |
+| Punchy | 100 | 130 | +9 | 255 |
+| Muted | 80 | 112 | -5 | 190 |
+
+EOL clean (numstat == EOL-insensitive numstat). Tools: `tools/fix_osd_reorg.pl`,
+`tools/fix_osd_move_page2.pl`, `tools/fix_osd_menumask.pl`, `tools/fix_hue_adj.pl`.
+
+---
+
+## DONE — savestate-LOAD hue fix: hs-fall re-anchor of composite phases (2026-09-13)
+
+**Symptom (user-reported, woz22 board):** every F5 (savestate LOAD) rotated the
+composite hue by an arbitrary quarter (0/90/180/270-degree subcarrier steps),
+different each attempt. SAVE and OSD-pause were fine — the `01e9d48`
+`machine_ce` gate (which freezes the pipeline during the stall) is intact and
+works (TB phase 3 bit-exact).
+
+**Root cause (second half of the same symptom class):** the encoder
+`burst_cnt` (apple_composite.sv) and decoder `phase` (composite_decoder.sv)
+free-run; their alignment to the core's HBL holds only by lockstep (line =
+whole subcarrier cycles: 912 = 4*228). A LOAD resumes the machine from the
+SAVED HBL position (timing-generator counters are restored), so the frozen
+phases resume misaligned to the invariant by `(h_stall - h_resume) mod 4`
+subcarrier samples -> phase-dependent hue rotation. The `01e9d48` gate removed
+the in-stall drift (stall-duration component); the resume-time discontinuity
+remained, and was only observable after the savestate DDR read fix landed.
+
+**Fix (core-only, no miosd change):** re-reference both free-runs to the
+measured invariant at every derived hs fall — the same edge `hcnt` resets on
+(`hs_d && ~hs` in each module):
+
+```verilog
+// apple_composite.sv
+localparam [1:0] BURST_PHASE_HS_FALL = 2'b11;
+if (hs_d && ~hs) burst_cnt <= BURST_PHASE_HS_FALL;
+else             burst_cnt <= burst_cnt + 2'd1;
+
+// composite_decoder.sv
+localparam [7:0] PHASE_AT_HS_FALL = 8'b1100_0000;
+if (hs_d && ~hs_in) phase <= PHASE_AT_HS_FALL;
+else                phase <= phase + PHASE_INC[23:16];
+```
+
+**Why the constants are board-correct:** measured in the pipeline TB
+(`K_enc=3, K_dec=192={3,6'b0}`, constant over 6 lines, pair-offset asserted).
+`tools/tb_hbl_pwrup.sv` (timing_generator alone, all inputs 0, Verilator
+zero-init == Cyclone V power-up) shows the board's HBLANK: first line 909
+cycles (HBLANK register rises at cycle 3), steady state re-grids onto
+multiples of 912 from t=0, and 912 % 4 == 0 -> the board's steady-state
+fall-edge phase equals the TB's. No preset re-tuning expected. In normal
+operation the re-anchor writes the value the counter already holds, so it is
+a bit-identical no-op (TB golden pixel R15 G72 Bff unchanged). Post-LOAD the
+phases snap to the invariant at the next hs fall (<=1 line, imperceptible).
+
+**TB (tools/tb_video_pipeline_regress.sv, extended):**
+- phase 2.5: K-capture at the re-anchor edge (synchronous monitor — the edge
+  where pre-edge `(hs_d && !hs)` holds; sample one edge later for the
+  post-write value), constancy over 6 lines + `{K,6'b0}` pair check; phase-3
+  pre-pixel asserted against the pre-fix golden (no-op proof).
+- phase 4 (NEW, models a real LOAD): 12345-cycle `machine_ce=0` stall at
+  field16/lcnt150/hcnt500, then the source counters jump to the saved
+  position (lcnt170/hcnt701; mod-4 distance 3 = 270-degree misalignment),
+  resume; asserts the first re-anchor edge after resume holds `k_inv` and the
+  post-load pixel (lcnt180/hcnt600) is bit-identical to the clean pre-stall
+  reference.
+- RED (pre-fix): phase 4 FAIL — `k_after = k_inv+3` (270 degrees), pixel
+  Re4 G10 Bff vs clean R15 G72 Bff. GREEN (post-fix): ALL PASS
+  (phases 1-4, 708,624 baseline samples 0 mismatches, stall_changes=0).
+
+**Lint:** no new warnings (HEAD 9 -> tree 8; remainder pre-existing width /
+unused-bit notes in the luma path). EOL preserved (autocrlf checkout; diff
+shows only the change hunks).
+
+**Build/run (MSYS2):**
+
+```sh
+cd /e/MiSTer/Apple-II_FPGAdev/Apple-II_MiSTer
+export VERILATOR_ROOT="C:/msys64/ucrt64/share/verilator"
+export PATH=/c/msys64/tmp/makeshim:/c/msys64/ucrt64/bin:$PATH
+export TMP=/c/msys64/tmp TEMP=/c/msys64/tmp TMPDIR=/c/msys64/tmp
+rm -rf obj_dir_tb_vp && mkdir -p obj_dir_tb_vp
+/c/msys64/ucrt64/bin/verilator_bin.exe --binary -sv --timing -O2 -Wno-fatal -Wno-lint \
+  tools/tb_video_pipeline_regress.sv rtl/video/video_pipeline.sv \
+  rtl/video/vga_controller.v rtl/video/apple_composite.sv rtl/video/composite_decoder.sv \
+  --top-module tb_video_pipeline_regress -o tb_vp \
+  --Mdir obj_dir_tb_vp/obj_dir && ./obj_dir_tb_vp/obj_dir/tb_vp.exe
+```
+
+**Not verified:** Quartus compile + board F5 (user). Expected: composite hue
+now stable across savestate loads; RGB/other paths untouched (no ports or
+instance changes; two always-block bodies only).
+
+---
+
 ## Pending changes (not started)
 
 1. **I-mirror chirality fix — DONE (2026-09-12), applied as the `i_mirror` flag.**
@@ -103,13 +275,10 @@ should be a conscious decision, not a default.
    `chroma_map=0`). **Still open:** the Punchy preset's `p_hue=8'd144` was chosen
    under the OLD (unmirrored) convention and will look different after the fix —
    re-verify presets on hardware.
-2. **Wire `comb_en` through the FPGA wrapper.** The bench
-   `apple_composite.sv` has the `comb_en` port (lines 82, 191) and the GUI
-   drives it; the FPGA `Apple-II_MiSTer/rtl/video/apple_composite.sv` has
-   **no `comb_en` port at all** (decoder instance's `.comb_en` unconnected →
-   floats to 0 → comb off). Add port + connection, and drive from
-   `video_pipeline.sv` (preset or hardwired `1'b1` — decision pending; the comb
-   is verified bit-identical off and improves stripe artifacts on).
+2. **Wire `comb_en` through the FPGA wrapper — DONE (2026-09-13).** The FPGA
+   `apple_composite.sv` now has the `comb_en` port (driven by the existing
+   "vertical blend" OSD option `NTSC_VERTICAL_COMB` in `video_pipeline.sv`), and
+   the decoder gates it with `color_line` (see DONE section above).
 3. **Per-graphics-mode hue presets (user is testing).** The single-hue knob
    cannot cover all Apple II graphics modes — the user found they need a
    different hue setting per mode and is measuring; expect a report with
@@ -127,15 +296,15 @@ should be a conscious decision, not a default.
 
 | File | Role / state |
 |---|---|
-| `Apple-II-Verilog_MiSTer/vga_color_test/rtl/composite_decoder.sv` | **Forward-path decoder** (LF): knob set (incl. `i_mirror` flag) + rot_mag2 + v4 split-notch comb + bright fix. Source of truth for the port. |
+| `Apple-II-Verilog_MiSTer/vga_color_test/rtl/composite_decoder.sv` | **Forward-path decoder** (LF): knob set (incl. `i_mirror`) + rot_mag2 + v4 split-notch comb + bright fix + horizontal `luma_sharpen` + `color_line` + comb-gate. Source of truth for the port. |
 | `Apple-II-Verilog_MiSTer/unit_tests/level_2/mister/composite_decoder.sv` | Probe DUT copy — byte-identical to bench (keep it synced after any decoder edit). |
-| `Apple-II_MiSTer/rtl/video/composite_decoder.sv` | FPGA copy — **CRLF**. Now synced to bench: knob set (incl. `i_mirror`) + rot_mag2 + v4 comb + bright fix. Edit via `perl :raw` only (or byte-safe copy from bench with LF→CRLF). |
+| `Apple-II_MiSTer/rtl/video/composite_decoder.sv` | FPGA copy — **CRLF**. Has `luma_sharpen` + `color_line` + comb-gate (added via `perl :raw`). Keeps its 8-bit `phase` opt — **NOT byte-identical to bench** (phase width differs); behavior-identical for SPC=4. Edit via `perl :raw` only. |
 | `Apple-II-Verilog_MiSTer/vga_color_test/rtl/apple_composite.sv` | Bench wrapper — has `comb_en` port + GUI-driven knobs. |
 | `Apple-II-Verilog_MiSTer/vga_color_test/rtl/vga_color_test_top.sv` | Bench top — flat `COMPOSITE_*` inputs incl. `COMPOSITE_COMB_EN`. |
 | `Apple-II-Verilog_MiSTer/vga_color_test/src/{vga_sim.h,vga_sim.cpp,sim_gui.cpp}` | GUI: knob state, flat-input drive, "Composite Knobs" window (checkbox "Comb (two-line average)"; hue slider full 0–255 again). |
 | `Apple-II-Verilog_MiSTer/unit_tests/level_2/mister/tb_mister_mirror_probe.sv` | Mirror probe — `+COMB_ON`, `+HUE8=%d`, `+BRIGHT=%d`, `+I_MIRROR` plusargs, HSL readout, VERDICT logic. |
-| `Apple-II_MiSTer/rtl/video/apple_composite.sv` | FPGA wrapper — has `i_mirror` port (chroma_map→flag). **Still missing `comb_en` port** (pending #2). |
-| `Apple-II_MiSTer/rtl/video/video_pipeline.sv` | FPGA switch + 4 presets — `p_i_mirror=1'b1` (chirality fix, done), no `p_comb_en` (pending #2). |
+| `Apple-II_MiSTer/rtl/video/apple_composite.sv` | FPGA wrapper — has `i_mirror`, `comb_en` (→ NTSC_VERTICAL_COMB), `color_line`, `luma_sharpen` ports. |
+| `Apple-II_MiSTer/rtl/video/video_pipeline.sv` | FPGA switch + 4 presets — `p_i_mirror=1'b1`, `p_luma_sharpen=0` (experimental, off), comb_en→NTSC_VERTICAL_COMB. |
 | `Apple-II_MiSTer/rtl/video/v3/` | Untracked reference variants (`composite_decoder.sv` v3, `composite_decoder_v4.sv`). **Parked, not forward path** — the v4 split-notch delta is already integrated into the knob version; do not copy v4 wholesale (it lacks knobs + rot_mag2). |
 | `Apple-II_MiSTer/COMPOSITE_PROGRESS.md` | This file. |
 

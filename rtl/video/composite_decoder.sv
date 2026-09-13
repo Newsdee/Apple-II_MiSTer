@@ -85,6 +85,8 @@ module composite_decoder #(
 	// Chroma from this line averaged with the one above, the way a comb set
 	// does. Luma is untouched. See the comb section.
 	input                comb_en,
+	input                color_line,   // color-killer: 1 = color line (burst present); 0 = B&W line
+	input                [3:0] luma_sharpen, // horizontal unsharp amount (0=off); color lines only
 
 	output logic         ce_out,
 	output logic         hs_out,
@@ -216,7 +218,10 @@ end
 /* verilator lint_off UNUSEDSIGNAL */
 wire signed [16:0] v_sum = c16 + prev;
 /* verilator lint_on UNUSEDSIGNAL */
-wire signed [15:0] cs = comb_en ? v_sum[16:1] : c16;
+// The comb (line-pair chroma blend) is a vertical-smoothing aid for COLOR lines. On color-killed
+// (monochrome) lines there is no chroma to blend, so it is disabled there: it can only smear the
+// luma-adjacent transitions and buys nothing for B&W.
+wire signed [15:0] cs = (comb_en && color_line) ? v_sum[16:1] : c16;
 
 // --------------------------------------------------------- notch: luma/chroma
 //
@@ -255,9 +260,9 @@ end
 
 // ------------------------------------------------------------ carrier and mix
 //
-// The accumulator free-runs and is never reset at hsync. Sources whose line is
-// a whole number of subcarrier cycles then hold a stable artifact hue down each
-// column, and sources whose line is a half cycle get their dot crawl, both
+// The accumulator free-runs. Sources whose line is a whole number of
+// subcarrier cycles then hold a stable artifact hue down each column,
+// and sources whose line is a half cycle get their dot crawl, both
 // without being told which they are.
 
 // Only bits [23:16] of the free-running accumulator are consumed (the
@@ -265,8 +270,14 @@ end
 // every SPC <= 256 the top 8 bits evolve exactly as an 8-bit counter
 // stepped by PHASE_INC[23:16] - which also keeps the six
 // constant-zero low bits out of the netlist at SPC=4 (Quartus 10030).
+localparam [7:0] PHASE_AT_HS_FALL = 8'b1100_0000;
 logic [7:0] phase;
-always_ff @(posedge clk) if (ce) phase <= phase + PHASE_INC[23:16];
+always_ff @(posedge clk) begin
+	if (ce) begin
+		if (hs_d && ~hs_in) phase <= PHASE_AT_HS_FALL;
+		else                phase <= phase + PHASE_INC[23:16];
+	end
+end
 
 function automatic signed [10:0] qsin(input [6:0] a);
 	case (a)
@@ -624,7 +635,21 @@ always_ff @(posedge clk) if (ce) begin
 	            else begin i8 <=  i8_scaled; q8 <=  q8_scaled; end
 end
 
-wire signed [27:0] y_sh  = {{2{y8[17]}}, y8, 8'd0};
+// Experimental luma sharpening (HORIZONTAL ONLY): a 1-tap unsharp mask, y + amt*(y - y[-1]).
+// It counteracts the decoder's horizontal subcarrier-reject low-pass (the softness). Gated by
+// color_line so the color-killed (monochrome) path is bit-identical to before; luma_sharpen=0
+// is also a no-op. The one-tap history is a single register (no line RAM). Vertical sharpen is
+// deliberately out of scope (would need a line delay and is far riskier).
+reg signed [17:0] y8_prev;
+wire signed [18:0] y_diff       = {y8[17], y8} - {y8_prev[17], y8_prev};
+wire signed [23:0] y_sharp      = luma_sharpen * y_diff;
+wire signed [23:0] y_sharp_full = y8 + y_sharp;
+wire signed [17:0] y8_sh = (y_sharp_full >= 24'sd131072) ? 18'sd131071 :
+                           (y_sharp_full <= -24'sd131072) ? -18'sd131072 : y_sharp_full[17:0];
+wire signed [17:0] y8_use = color_line ? y8_sh : y8;
+always_ff @(posedge clk) if (ce) y8_prev <= y8;
+
+wire signed [27:0] y_sh  = {{2{y8_use[17]}}, y8_use, 8'd0};
 wire signed [27:0] r_mix = y_sh + (i8 * 18'sd245 + q8 * 18'sd159);
 wire signed [27:0] g_mix = y_sh - (i8 * 18'sd70  + q8 * 18'sd166);
 wire signed [27:0] b_mix = y_sh - (i8 * 18'sd283 - q8 * 18'sd436);
