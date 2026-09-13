@@ -7,12 +7,11 @@ This is a MiSTer port of the Apple IIe core from MiST.
 Reconstruction of an 1980s-era Apple //e implemented in VHDL for FPGAs.  
 
 Originally ported from MiST: https://github.com/gyurco/apple2efpga, 
-which itsel was a port from DE2: http://www1.cs.columbia.edu/~sedwards/apple2fpga/  
+itself a port from DE2: http://www1.cs.columbia.edu/~sedwards/apple2fpga/  
 
 ## Features
 
-* Disk loading via OSD, supports floppes in .woz, .nib, .dsk, .do, .po formats
-NOTE: only .woz will persist saves to disk
+* Disk loading via OSD, supports floppes in .woz, .nib, .dsk, .do, .po formats (NOTE: only .woz will persist saves to disk)
 * HDD loading via osd
 * Selectable 6502 or 65C02 CPU
 * Save States (save/restore CPU and memory state to SD card)
@@ -83,13 +82,13 @@ From here you have some limited commands. See: http://www.landsnail.com/a2ref.ht
 
 ## Credits
 
-This core is a collaboration of many developers over the span of years.
-* Stephen Edwards: Original Apple II core for the DE2
-* Gyurco: MiST core main maintainer, Mouse Card, etc.
-* Wsoltys: Mockingboard, Saturn Card support, etc.
-* AlanSWX: WOZ support, Super Serial Card, Mouse Card, etc.
-* Kitrinx: CPU upgrades (high accuracy 6502 and 65c02 enabling save states), NTSC Composite video module
-* Newsdee: Virtual Keyboard, Joy2Key, Palette and Video Presets, Save States, OSD curation.
+This core is the result of the efforts of many developers over the span of years:
+* **Stephen Edwards**: Original Apple II+ core for the DE2
+* **Gyurco**: MiST core main maintainer, Mouse Card, etc.
+* **Wsoltys**: Mockingboard, Saturn Card support, etc.
+* **AlanSWX**: WOZ support, Super Serial Card, Mouse Card, etc.
+* **Kitrinx**: New CPU code (high accuracy 6502 and 65c02 enabling save states), NTSC Composite Decoder video module
+* **Newsdee**: Virtual Keyboard, Joy2Key, Palette and Video Presets, Save States, OSD curation.
 
 
 ## Advance usage
