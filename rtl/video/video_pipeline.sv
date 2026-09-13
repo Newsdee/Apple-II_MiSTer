@@ -151,7 +151,6 @@ module video_pipeline (
   reg        p_i_mirror;
   reg        p_chroma_short;
   reg  [3:0] p_smear, p_luma_delay;
-  reg  [3:0] p_luma_sharpen;
   reg        p_agc;
   always @* begin
     // defaults = neutral base (Punchy = base + hue); each preset overrides
@@ -163,7 +162,6 @@ module video_pipeline (
     p_chroma_short = 1'b0;
     p_smear      = 4'd0;
     p_luma_delay = 4'd0;
-    p_luma_sharpen = 4'd0;  // experimental horizontal luma unsharp; off by default
     p_agc        = 1'b1;
     case (comp_preset)
       2'd0: begin p_sat=8'd80;  p_hue=8'd115; p_bright=8'hF2; p_contrast=8'd177; end   // Calibrated (hardware-tuned; hue=112 base +3)
@@ -203,7 +201,6 @@ module video_pipeline (
     .luma_delay(p_luma_delay),
     .agc_en(p_agc),
     .comb_en(NTSC_VERTICAL_COMB),
-    .luma_sharpen(p_luma_sharpen),
     .r(r_comp),
     .g(g_comp),
     .b(b_comp),

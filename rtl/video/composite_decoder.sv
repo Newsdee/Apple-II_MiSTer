@@ -86,7 +86,6 @@ module composite_decoder #(
 	// does. Luma is untouched. See the comb section.
 	input                comb_en,
 	input                color_line,   // color-killer: 1 = color line (burst present); 0 = B&W line
-	input                [3:0] luma_sharpen, // horizontal unsharp amount (0=off); color lines only
 
 	output logic         ce_out,
 	output logic         hs_out,
@@ -635,21 +634,7 @@ always_ff @(posedge clk) if (ce) begin
 	            else begin i8 <=  i8_scaled; q8 <=  q8_scaled; end
 end
 
-// Experimental luma sharpening (HORIZONTAL ONLY): a 1-tap unsharp mask, y + amt*(y - y[-1]).
-// It counteracts the decoder's horizontal subcarrier-reject low-pass (the softness). Gated by
-// color_line so the color-killed (monochrome) path is bit-identical to before; luma_sharpen=0
-// is also a no-op. The one-tap history is a single register (no line RAM). Vertical sharpen is
-// deliberately out of scope (would need a line delay and is far riskier).
-reg signed [17:0] y8_prev;
-wire signed [18:0] y_diff       = {y8[17], y8} - {y8_prev[17], y8_prev};
-wire signed [23:0] y_sharp      = luma_sharpen * y_diff;
-wire signed [23:0] y_sharp_full = y8 + y_sharp;
-wire signed [17:0] y8_sh = (y_sharp_full >= 24'sd131072) ? 18'sd131071 :
-                           (y_sharp_full <= -24'sd131072) ? -18'sd131072 : y_sharp_full[17:0];
-wire signed [17:0] y8_use = color_line ? y8_sh : y8;
-always_ff @(posedge clk) if (ce) y8_prev <= y8;
-
-wire signed [27:0] y_sh  = {{2{y8_use[17]}}, y8_use, 8'd0};
+wire signed [27:0] y_sh  = {{2{y8[17]}}, y8, 8'd0};
 wire signed [27:0] r_mix = y_sh + (i8 * 18'sd245 + q8 * 18'sd159);
 wire signed [27:0] g_mix = y_sh - (i8 * 18'sd70  + q8 * 18'sd166);
 wire signed [27:0] b_mix = y_sh - (i8 * 18'sd283 - q8 * 18'sd436);
