@@ -4,7 +4,7 @@ This is a MiSTer port of the Apple IIe core from MiST.
 
 ## Description
 
-This is a reconstruction of an 1980s-era Apple ]\[+ implemented in VHDL for FPGAs.  
+Reconstruction of an 1980s-era Apple //e implemented in VHDL for FPGAs.  
 
 Originally ported from MiST: https://github.com/gyurco/apple2efpga, 
 which itsel was a port from DE2: http://www1.cs.columbia.edu/~sedwards/apple2fpga/  
