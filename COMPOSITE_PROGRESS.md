@@ -262,6 +262,99 @@ instance changes; two always-block bodies only).
 
 ---
 
+## DONE — 8px right-edge fix (HSHIFT_BASE=9) + mono phosphor composite + OSD menu cluster (2026-09-13)
+
+**User-reported issues:** (1) composite mode loses ~8 px on the right edge vs
+RGB; (2) monochrome Display Modes (B&W/Green/Amber) should work on the
+composite path with the same 2-color screen as RGB; (3) OSD cluster:
+remove "Comp H-Shift", "Comp Hue Adj" 32→16 steps, blank line +
+"Custom Palette"→"Custom RGB Palette", "NTSC vertical blend"→"NTSC Vert.
+Comb Filter".
+
+**8px measurement (`tools/tb_hoffset.sv`, bar-ruler method):** the composite
+timing window opened 8 cycles earlier than the native one (HBL_O fall 369 vs
+377 at the old base 3) while the content itself sits only 2 cycles left of
+native in the raw grid (content is raw-grid-locked by the hs-fall re-anchor;
+the decoder LAT re-aligns output to the window). Net: inside the window the
+composite picture sat **6 px right** of native (window-relative bar centers
+191/293/397 vs native 185/287/391), so the right edge ran off-frame. An
+edge-correlation method (v1 of the TB) gave an alias-ambiguous magnitude
+(period-4 subcarrier); the bar ruler (v2) is alias-free. Fix:
+`HSHIFT_BASE 3→9` (3+6), pipe 7→13 stages, `hshift_idx` 4-bit (9..12).
+Post-fix: window-relative centers **185/287/391 == native exactly**
+("composite appears 0 px right"); knob 0→3 still moves the window 375→378
+(debug path intact). The fixed 9px base subsumes the old 3px+OSD knob: the
+OSD "Comp H-Shift" option (status[63:62]) is **removed** and the top level
+drives `.comp_hshift(2'd0)` (the knob is kept as a debug port).
+
+**Mono phosphor blend (`video_pipeline.sv`, user-approved design):** no new
+decoder ports — in mono modes the machine's color killer already drops the
+burst, so the decoded composite is pure 2-level gray; `video_pipeline`
+thresholds `g_comp >= 8'd128` and snaps RGB to the mode's two phosphor
+colors (constants match `vga_controller` SCREEN_MODE palettes:
+B&W FFFFFF/000000, Green 00C001/000F01, Amber FF8001/200801), selected by
+the existing `SCREEN_MODE` input. HGR in mono = 2-level phosphor (approved;
+composite is 2-level luma anyway). Color mode (SCREEN_MODE=00) is untouched
+→ bit-identical. Encoder-side chroma encoding was rejected (a constant I/Q
+vector cannot reproduce the exact vga 2-color pair).
+
+**OSD changes (`Apple-II.sv` CONF_STR + wiring):** `P2oUV` Comp H-Shift
+removed (bits [63:62] freed — verified by `tools/osd_alloc.py --diff`: the
+only allocation change); `P2oPT` Comp Hue Adj 0..31→0..15, option ID `PT`
+kept so the miosd settings key + saved value survive, wrapper now maps
+`.comp_hue_adj({1'b0, status[61:57]} << 1)` (bit [61] freed); blank line
+`P2-;` added after the A2P section; labels renamed (display-only, no C++
+coupling — verified by grep).
+
+**Verification (Verilator 5.050, `obj_dir_hoffset` / `obj_dir_regress`):**
+- hoffset TB: 8px alignment exact (above); mono blend: green line =
+  28×W(00,C0,01) + 884×K(00,0F,01), B&W line = 28×W(FF,FF,FF) + 884×K(00,00,00),
+  **other=0 both** (every cycle exactly one of the two colors) → ALL PASS.
+- pipeline regress TB: ALL PASS (phases 1–4, 708,624 samples 0 mismatches,
+  golden pixel R15 G72 Bff unchanged → bit-identical normal operation).
+- Lint: 3-file scope 4 warnings, all pre-existing (0 new).
+- `eol_guard.sh`: clean. NOTE (conscious decision): the edit tool normalized
+  the edited CONF_STR region of `Apple-II.sv` to the file's dominant CRLF
+  (pre-edit the file was 901/914 CRLF with 13 mixed LF lines in that region);
+  the file is now uniformly 914/914 CRLF. Git (autocrlf) and Quartus are
+  EOL-agnostic here; content diff = exactly the 10 intended lines.
+
+**Board checks still for the user (Quartus build):** right edge aligned
+within the window; Green/Amber visible on composite; B&W truly gray; HGR
+2-level in mono; menu renders (no H-Shift; 16-step hue; renamed labels);
+hue still stable across F5 loads.
+
+---
+
+## DONE — seam-fix knobs de-ported from top (hardcoded in video_pipeline) (2026-09-13)
+
+`GRAY_SEAM_FIX` / `SEAM_RUN_FILL` / `SEAM_RUN_WIDE` are no longer ports of
+`apple2_top` or `video_pipeline` — they are fixed inside `video_pipeline.sv`
+(`localparam` 1 / 1 / 0) and no longer wired from `Apple-II.sv`.
+
+- `SEAM_RUN_FILL=1`, `SEAM_RUN_WIDE=0`: the top already drove constants
+  (`1'b1` / `1'b0`) — pure port removal, zero behavior change.
+- `GRAY_SEAM_FIX`: the top wired `~status[4]` (Display Type: off in Color TV
+  mode). That was redundant: the composite encoder consumes the raw 1-bit
+  `VIDEO` tap (`apple_composite .VIDEO(VIDEO)`), never the vga_controller RGB,
+  so the seam fix cannot reach the composite path in either state. Hardcoded
+  to `1'b1` (always on). Board behavior identical in both display types.
+- `RUN_FILL_OK` kept as-is (vga→pipeline feedback signal, not a top option).
+- Files: `Apple-II.sv` (3 lines removed), `rtl/apple2_top.v` (3 ports +
+  declarations + 3 connections removed), `rtl/video/video_pipeline.sv`
+  (3 input ports → 3 localparams), both TBs updated (regress TB keeps the
+  wires for its bare-vga reference).
+- Verified: regress TB ALL PASS (golden R15 G72 Bff unchanged; re-anchor
+  phase intact); hoffset TB: 0 px offset preserved, knob B−C=3, mono blend
+  ALL PASS; lint 0 new; `git diff --check` clean.
+- EOL note: `eol_guard.sh` flags every modified file in this repo as
+  `HEAD_cr=0 → worktree_cr=N` — baseline artifact, not drift: autocrlf=true
+  stores LF blobs while the worktree is uniformly CRLF (`git ls-files --eol`
+  = `i/lf w/crlf` for unmodified files too). All files touched here are
+  uniform CRLF (CR count == line count).
+
+---
+
 ## Pending changes (not started)
 
 1. **I-mirror chirality fix — DONE (2026-09-12), applied as the `i_mirror` flag.**
@@ -298,13 +391,13 @@ instance changes; two always-block bodies only).
 |---|---|
 | `Apple-II-Verilog_MiSTer/vga_color_test/rtl/composite_decoder.sv` | **Forward-path decoder** (LF): knob set (incl. `i_mirror`) + rot_mag2 + v4 split-notch comb + bright fix + horizontal `luma_sharpen` + `color_line` + comb-gate. Source of truth for the port. |
 | `Apple-II-Verilog_MiSTer/unit_tests/level_2/mister/composite_decoder.sv` | Probe DUT copy — byte-identical to bench (keep it synced after any decoder edit). |
-| `Apple-II_MiSTer/rtl/video/composite_decoder.sv` | FPGA copy — **CRLF**. Has `luma_sharpen` + `color_line` + comb-gate (added via `perl :raw`). Keeps its 8-bit `phase` opt — **NOT byte-identical to bench** (phase width differs); behavior-identical for SPC=4. Edit via `perl :raw` only. |
+| `Apple-II_MiSTer/rtl/video/composite_decoder.sv` | FPGA copy — **CRLF**. Has `color_line` + comb-gate (luma sharpening REMOVED 2026-09-13, commit 23b4f44). Keeps its 8-bit `phase` opt — **NOT byte-identical to bench** (phase width differs); behavior-identical for SPC=4. Edit via `perl :raw` only. |
 | `Apple-II-Verilog_MiSTer/vga_color_test/rtl/apple_composite.sv` | Bench wrapper — has `comb_en` port + GUI-driven knobs. |
 | `Apple-II-Verilog_MiSTer/vga_color_test/rtl/vga_color_test_top.sv` | Bench top — flat `COMPOSITE_*` inputs incl. `COMPOSITE_COMB_EN`. |
 | `Apple-II-Verilog_MiSTer/vga_color_test/src/{vga_sim.h,vga_sim.cpp,sim_gui.cpp}` | GUI: knob state, flat-input drive, "Composite Knobs" window (checkbox "Comb (two-line average)"; hue slider full 0–255 again). |
 | `Apple-II-Verilog_MiSTer/unit_tests/level_2/mister/tb_mister_mirror_probe.sv` | Mirror probe — `+COMB_ON`, `+HUE8=%d`, `+BRIGHT=%d`, `+I_MIRROR` plusargs, HSL readout, VERDICT logic. |
-| `Apple-II_MiSTer/rtl/video/apple_composite.sv` | FPGA wrapper — has `i_mirror`, `comb_en` (→ NTSC_VERTICAL_COMB), `color_line`, `luma_sharpen` ports. |
-| `Apple-II_MiSTer/rtl/video/video_pipeline.sv` | FPGA switch + 4 presets — `p_i_mirror=1'b1`, `p_luma_sharpen=0` (experimental, off), comb_en→NTSC_VERTICAL_COMB. |
+| `Apple-II_MiSTer/rtl/video/apple_composite.sv` | FPGA wrapper — has `i_mirror`, `comb_en` (→ NTSC_VERTICAL_COMB), `color_line` ports (luma sharpening REMOVED 23b4f44). |
+| `Apple-II_MiSTer/rtl/video/video_pipeline.sv` | FPGA switch + 4 presets — `p_i_mirror=1'b1`, comb_en→NTSC_VERTICAL_COMB, **HSHIFT_BASE=9** (8px fix), **mono phosphor blend** (SCREEN_MODE≠00 → 2-color snap on g_comp≥128). |
 | `Apple-II_MiSTer/rtl/video/v3/` | Untracked reference variants (`composite_decoder.sv` v3, `composite_decoder_v4.sv`). **Parked, not forward path** — the v4 split-notch delta is already integrated into the knob version; do not copy v4 wholesale (it lacks knobs + rot_mag2). |
 | `Apple-II_MiSTer/COMPOSITE_PROGRESS.md` | This file. |
 

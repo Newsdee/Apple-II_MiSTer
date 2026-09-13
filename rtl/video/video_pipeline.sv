@@ -33,9 +33,6 @@ module video_pipeline (
   input  wire        COLOR_LINE,
   input  wire [1:0]  SCREEN_MODE,
   input  wire [1:0]  COLOR_PALETTE,
-  input  wire        GRAY_SEAM_FIX,
-  input  wire        SEAM_RUN_FILL,
-  input  wire        SEAM_RUN_WIDE,
   input  wire        RUN_FILL_OK,
   input  wire        NTSC_VERTICAL_COMB,
   // custom palette loader (vga_controller ioctl)
@@ -58,7 +55,7 @@ module video_pipeline (
   // composite switch
   input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
   input  wire [1:0]  comp_preset,    // 0=Calibrated 1=Eyeballed 2=Punchy 3=Muted
-  input  wire [1:0]  comp_hshift,    // debug: composite H-shift 0-3 (on top of 3px)
+  input  wire [1:0]  comp_hshift,    // debug: composite H-shift 0-3 (on top of 9px base)
   input  wire [4:0]  comp_hue_adj,   // debug: composite hue adjust 0-31 (added to base hue)
   // final outputs (same names/widths vga_controller gave apple2_top)
   output wire [7:0]  R,
@@ -73,6 +70,13 @@ module video_pipeline (
   // ------------------------------------------------------------------
   // Native RGB color path (vga_controller)
   // ------------------------------------------------------------------
+  // Seam-fix knobs are fixed: the seam fix is always on (its RGB output
+  // is discarded in composite mode - the encoder consumes the raw 1-bit
+  // VIDEO, so it cannot reach the composite path), the run fill is fixed
+  // on/narrow. No top-level ports.
+  localparam GRAY_SEAM_FIX = 1'b1;
+  localparam SEAM_RUN_FILL = 1'b1;
+  localparam SEAM_RUN_WIDE = 1'b0;
   wire [7:0] r_vga, g_vga, b_vga;
   wire       hs_vga, vs_vga, hbl_vga, vbl_vga;
   vga_controller tv (
@@ -217,33 +221,62 @@ module video_pipeline (
   // The composite timing (hb/hs, derived from the decoded stream) lands a
   // few samples off from the native vga_controller timing, so the composite
   // picture reads as shifted and its right edge is pushed off-frame. Delay
-  // the composite TIMING by (3 + comp_hshift) cycles (RGB untouched) to
-  // slide the active window right, pulling the right-edge content into view
-  // and dropping the left margin. The native RGB path is the correctly
-  // centred reference and is never touched.
+  // the composite TIMING by (HSHIFT_BASE + comp_hshift) cycles (RGB
+  // untouched) to slide the active window right, pulling the right-edge
+  // content into view and dropping the left margin. The native RGB path is
+  // the correctly centred reference and is never touched.
   //
-  // comp_hshift is 0-3 from the OSD; the fixed 3px is added here. If the
-  // hardware shows the wrong direction, this is the spot to flip (delay the
-  // RGB instead, or add a line buffer for a true left-shift).
+  // HSHIFT_BASE = 9 is the TB-measured alignment (tools/tb_hoffset.sv,
+  // 2026-09-13): at the old base of 3 the composite picture sat 6 cycles
+  // right of the native picture inside the display window, so the right
+  // edge of the content ran off-frame. comp_hshift (0-3) is a debug
+  // override; the top level drives it 2'b0 (the OSD option was removed).
   // ------------------------------------------------------------------
-  localparam HSHIFT_MAX = 6;  // 3 fixed + 3 knob -> 3..6 cycles
-  reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 7 stages, index 0..6
+  localparam HSHIFT_BASE = 9;  // TB-measured composite alignment delay
+  localparam HSHIFT_MAX  = HSHIFT_BASE + 3;  // + 0..3 knob -> 9..12 cycles
+  reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 13 stages, index 0..12
   always @(posedge CLK_14M) begin
     if (machine_ce) begin
       hb_c_pipe <= {hb_c_pipe[HSHIFT_MAX-1:0], hb_c_out};
       hs_c_pipe <= {hs_c_pipe[HSHIFT_MAX-1:0], hs_c_out};
     end
   end
-  wire [2:0] hshift_idx = 3'd3 + comp_hshift;  // 3..6
+  wire [3:0] hshift_idx = HSHIFT_BASE[3:0] + {2'b00, comp_hshift};  // 9..12, fits 4 bits
   wire       hb_c_s = hb_c_pipe[hshift_idx];
   wire       hs_c_s = hs_c_pipe[hshift_idx];
 
   // ------------------------------------------------------------------
+  // Monochrome phosphor emulation (Display Mode B&W / Green / Amber).
+  //
+  // The composite path is 2-level luma; in mono mode the machine's color
+  // killer drops the burst, so the decoded output carries no chroma
+  // (r ~ g ~ b = gray). Snap that gray to the mode's two phosphor colors,
+  // matching the RGB path's 2-color screen (vga_controller values). Color
+  // mode (00) is untouched -> bit-identical.
+  // ------------------------------------------------------------------
+  localparam [23:0] W_BW = 24'hFFFFFF, K_BW = 24'h000000;
+  localparam [23:0] W_GR = 24'h00C001, K_GR = 24'h000F01;  // vga green
+  localparam [23:0] W_AM = 24'hFF8001, K_AM = 24'h200801;  // vga amber
+  logic [23:0] mono_w, mono_k;
+  always @(*) begin
+    case (SCREEN_MODE)
+      2'b01: begin mono_k = K_BW; mono_w = W_BW; end
+      2'b10: begin mono_k = K_GR; mono_w = W_GR; end
+      2'b11: begin mono_k = K_AM; mono_w = W_AM; end
+      default: begin mono_k = K_BW; mono_w = W_BW; end
+    endcase
+  end
+  wire mono_on = g_comp >= 8'd128;  // decoded gray: black..white
+  wire [7:0] r_mono = mono_on ? mono_w[23:16] : mono_k[23:16];
+  wire [7:0] g_mono = mono_on ? mono_w[15:8]  : mono_k[15:8];
+  wire [7:0] b_mono = mono_on ? mono_w[7:0]   : mono_k[7:0];
+
+  // ------------------------------------------------------------------
   // Final mux. Each path drives its own consistent RGB + timing set.
   // ------------------------------------------------------------------
-  assign R     = use_composite ? r_comp     : r_vga;
-  assign G     = use_composite ? g_comp     : g_vga;
-  assign B     = use_composite ? b_comp     : b_vga;
+  assign R     = use_composite ? (SCREEN_MODE != 2'b00 ? r_mono : r_comp) : r_vga;
+  assign G     = use_composite ? (SCREEN_MODE != 2'b00 ? g_mono : g_comp) : g_vga;
+  assign B     = use_composite ? (SCREEN_MODE != 2'b00 ? b_mono : b_comp) : b_vga;
   assign HS    = use_composite ? hs_c_s     : hs_vga;
   assign VS    = use_composite ? vs_c_out   : vs_vga;
   assign HBL_O = use_composite ? hb_c_s     : hbl_vga;

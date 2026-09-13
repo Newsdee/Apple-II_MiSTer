@@ -55,9 +55,6 @@ module apple2_top(
     video_switch,
     palette_switch,
     COLOR_PALETTE,
-    GRAY_SEAM_FIX,
-    SEAM_RUN_FILL,
-    SEAM_RUN_WIDE,
     NTSC_VERTICAL_COMB,
     use_composite,
     comp_preset,
@@ -181,15 +178,13 @@ module apple2_top(
     output        video_switch;
     output        palette_switch;
     input  [1:0]  COLOR_PALETTE;	// 00: Original (//e NTSC), 01: //gs, 02: AppleWin, 03: //c PAL
-    input         GRAY_SEAM_FIX;
-    input         SEAM_RUN_FILL;
-    input         SEAM_RUN_WIDE;
     input         NTSC_VERTICAL_COMB;
     // Composite video switch (see rtl/video/video_pipeline.sv).
     //   use_composite: "Color sharpness" RGB/Composite (Apple-II_woz status[4]).
     //   comp_preset:   0=Calibrated 1=Eyeballed 2=Punchy 3=Muted (status[2:1]).
-    //   comp_hshift:   debug composite H-shift 0-3, on top of a fixed 3px
-    //                  (status[63:62], P2Ouv). Composite path only.
+    //   comp_hshift:   debug composite H-shift 0-3, on top of a fixed 9px
+    //                  base (driven 2'b0 at the top; the OSD option
+    //                  P2Ouv was removed). Composite path only.
     input         use_composite;
     input  [1:0]  comp_preset;
     input  [1:0]  comp_hshift;
@@ -558,9 +553,6 @@ module apple2_top(
         .COLOR_LINE(COLOR_LINE_CONTROL),
         .SCREEN_MODE(SCREEN_MODE),
         .COLOR_PALETTE(COLOR_PALETTE),
-        .GRAY_SEAM_FIX(GRAY_SEAM_FIX),
-        .SEAM_RUN_FILL(SEAM_RUN_FILL),
-        .SEAM_RUN_WIDE(SEAM_RUN_WIDE),
         .RUN_FILL_OK(RUN_FILL_OK),
         .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
         // for custom palette loader
