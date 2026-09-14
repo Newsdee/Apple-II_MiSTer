@@ -55,7 +55,7 @@ module video_pipeline (
   // composite switch
   input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
   input  wire [1:0]  comp_preset,    // 0=Calibrated 1=Eyeballed 2=Punchy 3=Muted
-  input  wire [1:0]  comp_hshift,    // debug: composite H-shift 0-3 (on top of 9px base)
+  input  wire        comp_hfix,      // A/B: composite right-edge fix (0=current hshift=9, 1=trimmed hshift=0)
   input  wire [4:0]  comp_hue_adj,   // debug: composite hue adjust 0-31 (added to base hue)
   // final outputs (same names/widths vga_controller gave apple2_top)
   output wire [7:0]  R,
@@ -216,24 +216,24 @@ module video_pipeline (
   /* verilator lint_on PINMISSING */
 
   // ------------------------------------------------------------------
-  // Composite horizontal shift (DEBUG, composite path only).
+  // Composite horizontal shift (composite path only).
   //
   // The composite timing (hb/hs, derived from the decoded stream) lands a
   // few samples off from the native vga_controller timing, so the composite
-  // picture reads as shifted and its right edge is pushed off-frame. Delay
-  // the composite TIMING by (HSHIFT_BASE + comp_hshift) cycles (RGB
-  // untouched) to slide the active window right, pulling the right-edge
-  // content into view and dropping the left margin. The native RGB path is
-  // the correctly centred reference and is never touched.
+  // picture reads as shifted. Delay the composite TIMING by hshift_idx cycles
+  // (RGB untouched) to slide the active window. The native RGB path is the
+  // correctly centred reference and is never touched.
   //
-  // HSHIFT_BASE = 9 is the TB-measured alignment (tools/tb_hoffset.sv,
-  // 2026-09-13): at the old base of 3 the composite picture sat 6 cycles
-  // right of the native picture inside the display window, so the right
-  // edge of the content ran off-frame. comp_hshift (0-3) is a debug
-  // override; the top level drives it 2'b0 (the OSD option was removed).
+  // HSHIFT_BASE = 9 is the TB-measured mid-line alignment (tools/tb_hoffset.sv).
+  // However the decoder's HBL latency exceeds its RGB latency, so the window
+  // lands ~15px to the RIGHT of the picture: the right ~15px of the window is
+  // black (the right-edge black column). comp_hfix=1 trims the blanking
+  // hshift to 0, pulling the HBL_O rising edge left onto the picture's right
+  // edge and removing the column, without moving the picture. comp_hfix=0
+  // keeps the current hshift=9 behavior. Native path untouched.
   // ------------------------------------------------------------------
   localparam HSHIFT_BASE = 9;  // TB-measured composite alignment delay
-  localparam HSHIFT_MAX  = HSHIFT_BASE + 3;  // + 0..3 knob -> 9..12 cycles
+  localparam HSHIFT_MAX  = HSHIFT_BASE + 3;  // pipe must reach 9 (13 stages, index 0..12)
   reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 13 stages, index 0..12
   always @(posedge CLK_14M) begin
     if (machine_ce) begin
@@ -241,7 +241,7 @@ module video_pipeline (
       hs_c_pipe <= {hs_c_pipe[HSHIFT_MAX-1:0], hs_c_out};
     end
   end
-  wire [3:0] hshift_idx = HSHIFT_BASE[3:0] + {2'b00, comp_hshift};  // 9..12, fits 4 bits
+  wire [3:0] hshift_idx = comp_hfix ? 4'd0 : HSHIFT_BASE[3:0];  // 0 (fix) or 9 (current)
   wire       hb_c_s = hb_c_pipe[hshift_idx];
   wire       hs_c_s = hs_c_pipe[hshift_idx];
 

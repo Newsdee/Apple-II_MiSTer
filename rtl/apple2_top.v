@@ -58,7 +58,7 @@ module apple2_top(
     NTSC_VERTICAL_COMB,
     use_composite,
     comp_preset,
-    comp_hshift,
+    comp_hfix,
     comp_hue_adj,
     PALMODE,
     ROMSWITCH,
@@ -182,12 +182,11 @@ module apple2_top(
     // Composite video switch (see rtl/video/video_pipeline.sv).
     //   use_composite: "Color sharpness" RGB/Composite (Apple-II_woz status[4]).
     //   comp_preset:   0=Calibrated 1=Eyeballed 2=Punchy 3=Muted (status[2:1]).
-    //   comp_hshift:   debug composite H-shift 0-3, on top of a fixed 9px
-    //                  base (driven 2'b0 at the top; the OSD option
-    //                  P2Ouv was removed). Composite path only.
+    //   comp_hfix:     A/B composite right-edge fix (0=current hshift=9,
+    //                  1=trimmed hshift=0). Composite path only.
     input         use_composite;
     input  [1:0]  comp_preset;
-    input  [1:0]  comp_hshift;
+    input         comp_hfix;
     input  [4:0]  comp_hue_adj;
     input         PALMODE;		// PAL/NTSC selection
     input         ROMSWITCH;
@@ -402,7 +401,7 @@ module apple2_top(
                joy[5] | closed_apple, joy[4] | open_apple, TAPE_IN};
 
     always @(posedge CLK_14M) begin : P1
-    reg [31:0] cx, cy = 0;
+    reg signed [31:0] cx = 0, cy = 0;
 
     CLK_2M_D <= CLK_2M;
     if (CLK_2M_D == 1'b0 && CLK_2M == 1'b1) begin
@@ -564,7 +563,7 @@ module apple2_top(
         .ioctl_wait(ioctl_wait),
         .use_composite(use_composite),
         .comp_preset(comp_preset),
-        .comp_hshift(comp_hshift),
+        .comp_hfix(comp_hfix),
         .comp_hue_adj(comp_hue_adj),
         .R(r),
         .G(g),

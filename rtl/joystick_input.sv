@@ -66,7 +66,15 @@ wire signed [8:0] absolute_x_adjusted =
 	$signed({absolute_untrimmed[15], absolute_untrimmed[15:8]}) + x_center_offset;
 wire [7:0] absolute_x = absolute_x_adjusted > 9'sd127 ? 8'h7F :
 	absolute_x_adjusted < -9'sd128 ? 8'h80 : absolute_x_adjusted[7:0];
-wire [15:0] absolute_axes = {absolute_x, absolute_untrimmed[7:0]};
+// Absolute mode = held D-pad direction sets analog axis to its extreme (signed)
+// Relative mode = folds D-pad into joy_an via the accumulated delta
+wire [7:0] absolute_axes_x =
+	joystick_digital[0] && !joystick_digital[1] ? 8'h7F :
+	joystick_digital[1] && !joystick_digital[0] ? 8'h81 : absolute_x;
+wire [7:0] absolute_axes_y =
+	joystick_digital[2] && !joystick_digital[3] ? 8'h81 :
+	joystick_digital[3] && !joystick_digital[2] ? 8'h7F : absolute_untrimmed[7:0];
+wire [15:0] absolute_axes = {absolute_axes_x, absolute_axes_y};
 
 reg [RELATIVE_UPDATE_BITS-1:0] relative_update_counter = 0;
 reg signed [8:0] relative_x = 0;
@@ -109,9 +117,9 @@ always @(*) begin
 		relative_x_delta = -5'sd1;
 
 	if(joystick_digital[2] && !joystick_digital[3])
-		relative_y_delta = 5'sd3;
-	else if(joystick_digital[3] && !joystick_digital[2])
 		relative_y_delta = -5'sd3;
+	else if(joystick_digital[3] && !joystick_digital[2])
+		relative_y_delta = 5'sd3;
 	else if($signed(axes[7:0]) > 8'sd112)
 		relative_y_delta = 5'sd6;
 	else if($signed(axes[7:0]) > 8'sd96)

@@ -11,12 +11,14 @@ module virtual_keyboard_controller #(
 	parameter integer SNAP_AFTER_MS = 2200,
 	parameter bit SNAP_ENABLED = 1,
 	parameter bit WRAP = 0,
-	parameter bit DIAGONAL_LOCKED = 1
+	parameter bit DIAGONAL_LOCKED = 1,
+	parameter integer ANALOG_DEADZONE = 32
 ) (
 	input  wire        clk,
 	input  wire        reset,
 	input  wire [10:0] ps2_key,
 	input  wire [10:0] joystick,
+	input  wire [15:0] joystick_analog,
 	input  wire        enabled,
 	output reg  [10:0] filtered_ps2_key = 0,
 	output reg         active = 0,
@@ -142,8 +144,18 @@ function automatic direction_held(input [2:0] held_direction, input [3:0] direct
 	end
 endfunction
 
-wire [2:0] next_direction = requested_direction(joystick[3:0]);
-wire locked_direction_held = direction_held(direction, joystick[3:0]);
+// Combined 4-bit direction: digital D-pad OR analog stick
+wire signed [7:0] osk_dz = $signed(ANALOG_DEADZONE[7:0]);
+wire signed [7:0] osk_x = $signed(joystick_analog[7:0]);
+wire signed [7:0] osk_y = $signed(joystick_analog[15:8]);
+wire [3:0] directions = {
+	(joystick[3] | (osk_y >  osk_dz)),
+	(joystick[2] | (osk_y < -osk_dz)),
+	(joystick[1] | (osk_x < -osk_dz)),
+	(joystick[0] | (osk_x >  osk_dz))
+};
+wire [2:0] next_direction = requested_direction(directions);
+wire locked_direction_held = direction_held(direction, directions);
 wire direction_press = active && next_direction != DIR_NONE &&
 	(direction == DIR_NONE || !locked_direction_held ||
 	 (!DIAGONAL_LOCKED && next_direction != direction));

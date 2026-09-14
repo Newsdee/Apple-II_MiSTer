@@ -90,8 +90,35 @@ This core is the result of the efforts of many developers over the span of years
 * **Kitrinx**: New CPU code (high accuracy 6502 and 65c02 enabling save states), NTSC Composite Decoder video module
 * **Newsdee**: Virtual Keyboard, Joy2Key, Palette and Video Presets, Save States, OSD curation.
 
+## Using the Virtual Keyboard
 
-## Advance usage
+Map joystick buttons to the core in order to use the virtual keyboard. 
+(you will notice you are prompred for more buttons than a normal Apple II controller)
+
+The core assumes the convention of a SNES-style controller:
+- **Start**: Show/Hide Virtual Keyboard
+- **Select**: Change opacity of Virtual Keyboard (100%/75%/50%/25%)
+- **L**: Move Virtual Keyboard on top of the screen (and toggle back)
+- **R**: Press Enter
+- **D-Pad**: Select key 
+- **A**: Press selected key
+- **B**: Back (Apple II does not have a "Backspace", programs relied on back arrow)
+- **X**: Press Space 
+
+In addition the keyboard has a CMD button where the Apple II "Reset" key was. 
+You can use this to trigger special Apple II shortcuts:
+- **WARM** - Warm Reboot (Ctrl + Reset)
+- **COLD** - Cold Boot, sends Ctrl + Open Apple + Reset
+- **TEST** - Test Boot, sends Ctrl + Closed Apple + Reset
+
+## Save States
+
+The core supports save states, backing up the CPU state and 128K of RAM to SD card. You can save up to 4 slots, selectable in OSD.
+**Note** that disk contents (floppy or HDD) are __not__ part of the save state - similar to how a save state would work on real hardware.
+
+
+
+## Advanced usage
 
 If you want to boot another disk choose a .woz, .dsk, or .nib image via the osd and type the following:
 
