@@ -248,7 +248,7 @@ virtual_keyboard_controller virtual_keyboard_controller
 	.reset(RESET | status[0]),
 	.ps2_key(ps2_key),
 	.joystick(joystick_0[10:0]),
-	.joystick_analog(joystick_a0),
+	.joystick_analog(joystick_a0_norm),
 	.enabled(virtual_keyboard_enabled),
 	.filtered_ps2_key(filtered_ps2_key),
 	.active(virtual_keyboard_active),
@@ -332,6 +332,13 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 
 ///////////////////////////////////////////////////
 
+// The HPS gamepad reports +Y = stick down (screen coordinates), but the
+// core PDL path (joy_an) and the OSK cursor both assume +Y = stick up.
+// Negate the analog Y byte once here so both consumers see the same
+// normalized axis. The X byte, all digital D-pad/button bits, and the
+// separate paddle input are untouched.
+wire [15:0] joystick_a0_norm = {-joystick_a0[15:8], joystick_a0[7:0]};
+
 wire [15:0] joya;
 wire  [7:0] joyd;
 wire [15:0] core_joya = virtual_keyboard_active ? 16'h0000 : joya;
@@ -345,7 +352,7 @@ joystick_input joystick_input
 	.clk(clk_sys),
 	.reset(RESET | status[0] | buttons[1] | virtual_keyboard_reset | soft_reset),
 	.joystick_digital(joystick_0),
-	.joystick_analog(joystick_a0),
+	.joystick_analog(joystick_a0_norm),
 	.paddle(paddle_0),
 	.swap_axes(status[6]),
 	.paddle_as_x(status[17]),
