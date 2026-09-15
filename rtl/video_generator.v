@@ -36,12 +36,17 @@ input wire [7:0]  ioctl_data,
 input wire        ioctl_wr,
 
 input wire        FLASH_CLK,  // Low-frequency flashing text clock
-output wire       VIDEO
+output wire       VIDEO,
+input wire [9:0]  ss_addr,
+input wire [63:0] ss_wdata,
+input wire        ss_wren,
+input wire        machine_ce,
+output wire [63:0] ss_rdata
 );
 
 // IIe signals
 wire [11:0] video_rom_addr;
-reg  [7:0]  video_rom_out;
+wire [7:0]  video_rom_out;
 reg  [7:0]  video_shiftreg;
 
 wire [12:0] video_rom_input_addr;
@@ -66,19 +71,24 @@ wire [12:0] video_rom_input_addr;
   // "rtl/roms/video2.hex"). Synchronous read; on a write the new data
   // appears on the output (spram NEW_DATA behavior).
   reg [7:0] video_rom [0:8191];
+  reg [7:0] video_rom_q;
   initial $readmemh("rtl/roms/video2.hex", video_rom);
 
   always @(posedge CLK_14M) begin
-    if (ioctl_wr) begin
+    if (machine_ce && ioctl_wr)
       video_rom[video_rom_input_addr] <= ioctl_data;
-      video_rom_out                   <= ioctl_data;
-    end else begin
-      video_rom_out <= video_rom[video_rom_input_addr];
-    end
+
+    video_rom_q <= (machine_ce && ioctl_wr) ? ioctl_data
+                                             : video_rom[video_rom_input_addr];
   end
 
+  assign video_rom_out = video_rom_q;
+
   always @(posedge CLK_14M) begin
-    if (CLK_7M == 1'b0) begin
+    if (ss_wren && (ss_addr == 10'd7)) begin
+      video_shiftreg <= ss_wdata[15:8];
+    end
+    else if (machine_ce && CLK_7M == 1'b0) begin
       if (LDPS_N == 1'b0) begin
         // load
         if (WNDW_N == 1'b1) begin
@@ -96,5 +106,7 @@ wire [12:0] video_rom_input_addr;
   end
 
   assign VIDEO = ~video_shiftreg[0];
+  assign ss_rdata = (ss_addr == 10'd7) ?
+                    {48'd0, video_shiftreg, 8'd0} : 64'd0;
 
 endmodule
