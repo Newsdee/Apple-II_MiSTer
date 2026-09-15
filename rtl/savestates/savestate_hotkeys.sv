@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Newsdee
+
 module savestate_hotkeys (
 	input  wire        clk,
 	input  wire        reset,

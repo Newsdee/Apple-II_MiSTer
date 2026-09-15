@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Newsdee
+
 //
 // savestate_ui.sv - Save-state OSD/UI controller for the Apple II core.
-//
-// Modeled on the MiSTer NES core's savestate_ui.sv, adapted to the Apple II
-// status bitmap (see SAVESTATE_INTEGRATION_PLAN.md, status audit).
 //
 // OSD status bits (CONF_STR "Save States" page, lowercase 'o' = +32 offset):
 //   status[45]    "Savestates to SDCard" - shown, always grayed (menumask[8]=0),
@@ -86,11 +86,7 @@ module savestate_ui (
         info_req <= 1'b1;
       end
 
-      // Commands: the OSD lines pulse their status bit (miostd sets the bit
-      // high then low on selection), the hotkeys pulse their request. The
-      // manager only accepts in IDLE, so latch and forward only when idle;
-      // requests arriving while busy are dropped by the manager and produce
-      // no feedback (the command lines are grayed while busy).
+      // Commands: the OSD lines pulse their status bit
       if (!ss_busy) begin
         if ((osd_save & ~old_osd_save) | hk_save) begin
           ss_save_req <= 1'b1;
