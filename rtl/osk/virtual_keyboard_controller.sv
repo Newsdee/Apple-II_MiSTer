@@ -11,12 +11,14 @@ module virtual_keyboard_controller #(
 	parameter integer SNAP_AFTER_MS = 2200,
 	parameter bit SNAP_ENABLED = 1,
 	parameter bit WRAP = 0,
-	parameter bit DIAGONAL_LOCKED = 1
+	parameter bit DIAGONAL_LOCKED = 1,
+	parameter integer ANALOG_DEADZONE = 40
 ) (
 	input  wire        clk,
 	input  wire        reset,
 	input  wire [10:0] ps2_key,
 	input  wire [10:0] joystick,
+	input  wire [15:0] joystick_analog,
 	input  wire        enabled,
 	output reg  [10:0] filtered_ps2_key = 0,
 	output reg         active = 0,
@@ -87,6 +89,8 @@ reg [2:0] command = CMD_NONE;
 reg [6:0] joystick_buttons_d = 0;
 reg [2:0] virtual_key_source = SOURCE_NONE;
 reg enabled_d = 0;
+reg [2:0] saved_row = 1;
+reg [3:0] saved_col = 1;
 reg physical_left_shift = 0;
 reg physical_right_shift = 0;
 reg physical_control = 0;
@@ -140,8 +144,18 @@ function automatic direction_held(input [2:0] held_direction, input [3:0] direct
 	end
 endfunction
 
-wire [2:0] next_direction = requested_direction(joystick[3:0]);
-wire locked_direction_held = direction_held(direction, joystick[3:0]);
+// Combined 4-bit direction: digital D-pad OR analog stick, applying a deadzone to reduce noise
+wire signed [7:0] osk_dz = $signed(ANALOG_DEADZONE[7:0]);
+wire signed [7:0] osk_x = $signed(joystick_analog[7:0]);
+wire signed [7:0] osk_y = $signed(joystick_analog[15:8]);
+wire [3:0] directions = {
+	(joystick[3] | (osk_y >  osk_dz) && !joystick[2]),
+	(joystick[2] | (osk_y < -osk_dz) && !joystick[3]),
+	(joystick[1] | (osk_x < -osk_dz) && !joystick[0]),
+	(joystick[0] | (osk_x >  osk_dz) && !joystick[1])
+};
+wire [2:0] next_direction = requested_direction(directions);
+wire locked_direction_held = direction_held(direction, directions);
 wire direction_press = active && next_direction != DIR_NONE &&
 	(direction == DIR_NONE || !locked_direction_held ||
 	 (!DIAGONAL_LOCKED && next_direction != direction));
@@ -334,6 +348,12 @@ task automatic close_overlay;
 	begin
 		if(virtual_key_source == SOURCE_SELECT || virtual_key_source == SOURCE_BACK)
 			release_virtual_key();
+		// Remember the cursor position (main page only) so reopening resumes
+		// where the user left off instead of snapping back to the top-left key.
+		if(!commands_page) begin
+			saved_row <= selected_row;
+			saved_col <= selected_col;
+		end
 		active <= 0;
 		commands_page <= 0;
 		shift_latched <= 0;
@@ -347,8 +367,8 @@ task automatic open_overlay;
 	begin
 		active <= 1;
 		commands_page <= 0;
-		selected_row <= 1;
-		selected_col <= 1;
+		selected_row <= saved_row;
+		selected_col <= saved_col;
 		shift_latched <= 0;
 		control_latched <= 0;
 		open_apple <= 0;
@@ -415,6 +435,8 @@ always @(posedge clk) begin
 		commands_page <= 0;
 		selected_row <= 1;
 		selected_col <= 1;
+		saved_row  <= 1;
+		saved_col  <= 1;
 		shift_latched <= 0;
 		control_latched <= 0;
 		caps_latched <= 1;

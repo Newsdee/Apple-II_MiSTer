@@ -66,18 +66,32 @@ wire signed [8:0] absolute_x_adjusted =
 	$signed({absolute_untrimmed[15], absolute_untrimmed[15:8]}) + x_center_offset;
 wire [7:0] absolute_x = absolute_x_adjusted > 9'sd127 ? 8'h7F :
 	absolute_x_adjusted < -9'sd128 ? 8'h80 : absolute_x_adjusted[7:0];
-wire [15:0] absolute_axes = {absolute_x, absolute_untrimmed[7:0]};
+// Absolute mode = held D-pad direction sets analog axis to its extreme (signed)
+// Relative mode = folds D-pad into joy_an via the accumulated delta
+wire [7:0] absolute_axes_x =
+	joystick_digital[0] && !joystick_digital[1] ? 8'h7F :
+	joystick_digital[1] && !joystick_digital[0] ? 8'h81 : absolute_x;
+// Machine Y = -raw Y (normal mapping)
+wire signed [8:0] absolute_y_machine =
+	swap_axes ? $signed({absolute_untrimmed[7], absolute_untrimmed[7:0]}) :
+	-$signed({absolute_untrimmed[7], absolute_untrimmed[7:0]});
+wire [7:0] absolute_axes_y =
+	joystick_digital[2] && !joystick_digital[3] ? 8'h7F :
+	joystick_digital[3] && !joystick_digital[2] ? 8'h81 :
+	absolute_y_machine > 9'sd127 ? 8'h7F :
+	absolute_y_machine < -9'sd128 ? 8'h80 : absolute_y_machine[7:0];
+wire [15:0] absolute_axes = {absolute_axes_x, absolute_axes_y};
 
 reg [RELATIVE_UPDATE_BITS-1:0] relative_update_counter = 0;
 reg signed [8:0] relative_x = 0;
 reg signed [8:0] relative_y = 0;
 reg relative_mode_d = 0;
 reg signed [4:0] relative_x_delta;
-reg signed [4:0] relative_y_delta;
+reg signed [4:0] relative_y_analog_delta;
 
 always @(*) begin
 	relative_x_delta = 5'sd0;
-	relative_y_delta = 5'sd0;
+	relative_y_analog_delta = 5'sd0;
 
 	if(joystick_digital[0] && !joystick_digital[1])
 		relative_x_delta = 5'sd3;
@@ -108,35 +122,39 @@ always @(*) begin
 	else if($signed(axes[15:8]) < -8'sd16)
 		relative_x_delta = -5'sd1;
 
-	if(joystick_digital[2] && !joystick_digital[3])
-		relative_y_delta = 5'sd3;
-	else if(joystick_digital[3] && !joystick_digital[2])
-		relative_y_delta = -5'sd3;
-	else if($signed(axes[7:0]) > 8'sd112)
-		relative_y_delta = 5'sd6;
+	// Analog ladder in the raw sign of axes[7:0]; the D-pad is handled
+	// outside the ladder (it is a physical direction, not a raw axis).
+	if($signed(axes[7:0]) > 8'sd112)
+		relative_y_analog_delta = 5'sd6;
 	else if($signed(axes[7:0]) > 8'sd96)
-		relative_y_delta = 5'sd5;
+		relative_y_analog_delta = 5'sd5;
 	else if($signed(axes[7:0]) > 8'sd80)
-		relative_y_delta = 5'sd4;
+		relative_y_analog_delta = 5'sd4;
 	else if($signed(axes[7:0]) > 8'sd64)
-		relative_y_delta = 5'sd3;
+		relative_y_analog_delta = 5'sd3;
 	else if($signed(axes[7:0]) > 8'sd40)
-		relative_y_delta = 5'sd2;
+		relative_y_analog_delta = 5'sd2;
 	else if($signed(axes[7:0]) > 8'sd16)
-		relative_y_delta = 5'sd1;
+		relative_y_analog_delta = 5'sd1;
 	else if($signed(axes[7:0]) < -8'sd112)
-		relative_y_delta = -5'sd6;
+		relative_y_analog_delta = -5'sd6;
 	else if($signed(axes[7:0]) < -8'sd96)
-		relative_y_delta = -5'sd5;
+		relative_y_analog_delta = -5'sd5;
 	else if($signed(axes[7:0]) < -8'sd80)
-		relative_y_delta = -5'sd4;
+		relative_y_analog_delta = -5'sd4;
 	else if($signed(axes[7:0]) < -8'sd64)
-		relative_y_delta = -5'sd3;
+		relative_y_analog_delta = -5'sd3;
 	else if($signed(axes[7:0]) < -8'sd40)
-		relative_y_delta = -5'sd2;
+		relative_y_analog_delta = -5'sd2;
 	else if($signed(axes[7:0]) < -8'sd16)
-		relative_y_delta = -5'sd1;
+		relative_y_analog_delta = -5'sd1;
 end
+
+// The D-pad is a physical direction, not a raw axis
+wire signed [4:0] relative_y_delta =
+	joystick_digital[2] && !joystick_digital[3] ? 5'sd3 :
+	joystick_digital[3] && !joystick_digital[2] ? -5'sd3 :
+	swap_axes ? relative_y_analog_delta : -relative_y_analog_delta;
 
 wire signed [9:0] relative_x_next =
 	{relative_x[8], relative_x} + {{5{relative_x_delta[4]}}, relative_x_delta};
