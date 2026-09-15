@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Newsdee
+
 // video_pipeline.sv
 // =====================================================================
-// Presentation-pipeline switch for the newsdee core.
+// Presentation-pipeline switch for the Apple-II FPGA core.
 //
 // Takes the raw 1-bit Apple VIDEO + 14 MHz blanking (HBL/VBL) and produces
 // the final RGB + timing that feeds the video_mixer. Two paths, muxed on
@@ -42,15 +45,7 @@ module video_pipeline (
   input  wire        ioctl_download,
   input  wire        ioctl_wr,
   output wire        ioctl_wait,
-  // Freeze the whole pipeline during a machine stall (save/load, OSD
-  // pause): while machine_ce is low the core holds HBL/VBL/VIDEO
-  // frozen but the 14 MHz domain keeps running.  If the composite path
-  // kept running it would free-run its subcarrier, synthesize phantom
-  // lines from the stuck sync, and fill the vertical comb's field RAM
-  // with garbage - the decoded hue then lands at a phase-dependent
-  // value on resume (a different hue on every save/load attempt).
-  // Gating ce freezes encoder/decoder/comb deterministically: the frame
-  // holds on screen and resumes exactly where it stopped.
+  // Freeze the whole pipeline during a machine stall (save/load, OSD pause)
   input  wire        machine_ce,
   // composite switch
   input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
@@ -70,10 +65,7 @@ module video_pipeline (
   // ------------------------------------------------------------------
   // Native RGB color path (vga_controller)
   // ------------------------------------------------------------------
-  // Seam-fix knobs are fixed: the seam fix is always on (its RGB output
-  // is discarded in composite mode - the encoder consumes the raw 1-bit
-  // VIDEO, so it cannot reach the composite path), the run fill is fixed
-  // on/narrow. No top-level ports.
+  // Seam-fix knobs are fixed, we now have a preferred settings.
   localparam GRAY_SEAM_FIX = 1'b1;
   localparam SEAM_RUN_FILL = 1'b1;
   localparam SEAM_RUN_WIDE = 1'b0;
@@ -181,9 +173,7 @@ module video_pipeline (
   // ------------------------------------------------------------------
   wire [7:0]  r_comp, g_comp, b_comp;
   wire        hs_c_out, vs_c_out, hb_c_out, vb_c_out;
-  // ce_out and comp_sample are apple_composite testability ports, not needed
-  // in the core build (the 14 MHz domain is always enabled; comp_sample is
-  // the raw encoder stream). Left unconnected on purpose.
+  // ce_out and comp_sample are apple_composite testability ports, Left unconnected on purpose.
   /* verilator lint_off PINMISSING */
   apple_composite u_comp (
     .clk(CLK_14M),
@@ -216,21 +206,7 @@ module video_pipeline (
   /* verilator lint_on PINMISSING */
 
   // ------------------------------------------------------------------
-  // Composite horizontal shift (composite path only).
-  //
-  // The composite timing (hb/hs, derived from the decoded stream) lands a
-  // few samples off from the native vga_controller timing, so the composite
-  // picture reads as shifted. Delay the composite TIMING by hshift_idx cycles
-  // (RGB untouched) to slide the active window. The native RGB path is the
-  // correctly centred reference and is never touched.
-  //
-  // HSHIFT_BASE = 9 is the TB-measured mid-line alignment (tools/tb_hoffset.sv).
-  // However the decoder's HBL latency exceeds its RGB latency, so the window
-  // lands ~15px to the RIGHT of the picture: the right ~15px of the window is
-  // black (the right-edge black column). comp_hfix=1 trims the blanking
-  // hshift to 0, pulling the HBL_O rising edge left onto the picture's right
-  // edge and removing the column, without moving the picture. comp_hfix=0
-  // keeps the current hshift=9 behavior. Native path untouched.
+  // Composite horizontal shift (composite path only, fine tuning of alignment).
   // ------------------------------------------------------------------
   localparam HSHIFT_BASE = 9;  // TB-measured composite alignment delay
   localparam HSHIFT_MAX  = HSHIFT_BASE + 3;  // pipe must reach 9 (13 stages, index 0..12)
@@ -247,12 +223,6 @@ module video_pipeline (
 
   // ------------------------------------------------------------------
   // Monochrome phosphor emulation (Display Mode B&W / Green / Amber).
-  //
-  // The composite path is 2-level luma; in mono mode the machine's color
-  // killer drops the burst, so the decoded output carries no chroma
-  // (r ~ g ~ b = gray). Snap that gray to the mode's two phosphor colors,
-  // matching the RGB path's 2-color screen (vga_controller values). Color
-  // mode (00) is untouched -> bit-identical.
   // ------------------------------------------------------------------
   localparam [23:0] W_BW = 24'hFFFFFF, K_BW = 24'h000000;
   localparam [23:0] W_GR = 24'h00C001, K_GR = 24'h000F01;  // vga green
