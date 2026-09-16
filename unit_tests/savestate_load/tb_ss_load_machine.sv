@@ -24,7 +24,13 @@
 // Checks:
 //   C1  load handshake: done=1, error=0
 //   C2  RAM sample match vs file (main + aux, strided samples via port B)
-//   C3  register word readback vs file (ss_addr 0..10, words 16..26)
+//   C3  restore data path: every ss_wren word the manager applies during
+//       the load is captured and compared to file words 16..26; the
+//       readback mux is checked for the static words only (3: soft
+//       switches/ROM latches, 10: active-cpu) because words 0/1/2 (CPU),
+//       4 (latches/phase), 5/6 (timing), 7 (video cx/cy), 8 (flash) and
+//       9 (speaker) are stateful and advance the instant the machine
+//       resumes after the load.
 //   C4  machine liveness after load: cpu_frozen clears, RAM writes occur,
 //       hsync keeps toggling (machine resumes from the saved state)
 //
@@ -181,6 +187,7 @@ module tb_ss_load_machine;
     .comp_preset(2'd0),
     .comp_hfix(1'b0),
     .comp_hue_adj(8'd0),
+    .video_switch(), .palette_switch(),
     .PALMODE(1'b0),
     .ROMSWITCH(1'b1),
     .PS2_Key(1'b0),
@@ -327,8 +334,26 @@ module tb_ss_load_machine;
   always @(posedge hsync) hs_rises = hs_rises + 1;
   always @(posedge clk_sys) if (ram_we) ram_writes = ram_writes + 1;
 
+  // C3 restore capture: latch the ss bus write the manager applies per
+  // word (last writer wins - the manager re-applies words 0..2 in
+  // APPLY_CPU; the machine is stalled the whole load, so nothing else
+  // can touch these registers).
+  reg [63:0] captured_w  [0:10];
+  reg        captured_ok [0:10];
+  initial begin
+    integer ci;
+    for (ci = 0; ci < 11; ci = ci + 1) captured_ok[ci] = 1'b0;
+  end
+  always @(posedge clk_sys) begin
+    if (mgr_ss_wren) begin
+      captured_w[mgr_ss_addr[3:0]]   <= mgr_ss_wdata;
+      captured_ok[mgr_ss_addr[3:0]] <= 1'b1;
+    end
+  end
+
   // ---------------------------------------------------------------- checks
   integer fails = 0;
+  reg c1_done;
 
   task automatic probe_ram(input [15:0] bank_addr, input logic is_aux, input int file_off);
     logic [7:0] got;
@@ -370,25 +395,34 @@ module tb_ss_load_machine;
     @(negedge clk_sys);
     load_req <= 1'b0;
 
-    // wait for done with timeout
-    fork
-      begin : wait_done
-        wait (ss_done);
-        disable fork;
+    // wait for done with a cycle budget (single-threaded poll -
+    // the sim's wait() missed the 1-cycle ss_done pulse (runs 1-2,
+    // 2026-09-16: the wait branch never woke at ~213K and either let the
+    // timeout fire or raced it, printing FAIL and PASS). A load takes
+    // ~213K clk_sys here (20ns clock ~ 4.3ms); the 8M budget is ~37x).
+    begin : c1
+      integer c1_cnt;
+      c1_done = 1'b0;
+      for (c1_cnt = 0; c1_cnt < 8_000_000 && !c1_done; c1_cnt = c1_cnt + 1) begin
+        @(posedge clk_sys);
+        if (ss_done) c1_done = 1'b1;
       end
-      begin : timeout
-        repeat (2_000_000) @(posedge clk_sys);
-        $display("FAIL C1: no ss_done within 2M clk_sys after request_load");
+      if (!c1_done) begin
+        $display("FAIL C1: no ss_done within 8M clk_sys after request_load");
         fails = fails + 1;
-        disable fork;
+      end else if (ss_error) begin
+        $display("FAIL C1: load done with error=1 error_code=%0d", ss_error_code);
+        fails = fails + 1;
+      end else begin
+        $display("PASS C1: load done, no error (locked_cpu=%0b) after %0d clk_sys",
+          ss_locked_cpu, c1_cnt);
       end
-    join
-    if (ss_error) begin
-      $display("FAIL C1: load done with error=1 error_code=%0d", ss_error_code);
-      fails = fails + 1;
-    end else begin
-      $display("PASS C1: load done, no error (locked_cpu=%0b)", ss_locked_cpu);
     end
+    // restart the liveness counters so C4 measures post-resume activity
+    // only (boot ROM loads and the manager's own port-B writes during
+    // the load would otherwise count)
+    hs_rises = 0;
+    ram_writes = 0;
     repeat (20) @(posedge clk_sys);
 
     // C2: RAM sample match (24 main + 24 aux, strided; per-sample failures
@@ -404,10 +438,24 @@ module tb_ss_load_machine;
       $display("C2: RAM sample probes done (48 samples)");
     end
 
-    // C3: register word readback (ss_addr 0..10 vs file words 16..26)
-    for (int i = 0; i < 11; i = i + 1)
-      probe_reg(i, file_word(16 + i));
-    $display("C3: register word readbacks done (11 words)");
+    // C3: restore data path - ss bus writes captured during the load vs
+    // file words 16..26
+    for (int i = 0; i < 11; i = i + 1) begin
+      if (!captured_ok[i]) begin
+        $display("FAIL C3 reg word %0d: no ss_wren seen during load", i);
+        fails = fails + 1;
+      end else if (captured_w[i] !== file_word(16 + i)) begin
+        $display("FAIL C3 reg word %0d: ss bus applied %016h, file word %0d = %016h",
+          i, captured_w[i], 16 + i, file_word(16 + i));
+        fails = fails + 1;
+      end
+    end
+    $display("C3: ss-bus restore capture done (11 words)");
+    // C3b: readback through the machine's own ss_rdata mux - valid for
+    // the static words only
+    probe_reg(3,  file_word(19));
+    probe_reg(10, file_word(26));
+    $display("C3b: static-word readbacks done (2 words)");
 
     // C4: liveness - run a while after the load
     repeat (500_000) @(posedge clk_sys);
