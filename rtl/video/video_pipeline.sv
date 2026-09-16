@@ -51,6 +51,7 @@ module video_pipeline (
   // value on resume (a different hue on every save/load attempt).
   // Gating ce freezes encoder/decoder/comb deterministically: the frame
   // holds on screen and resumes exactly where it stopped.
+  input  wire        reset,        // machine reset -> composite decoder
   input  wire        machine_ce,
   // composite switch
   input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
@@ -187,6 +188,7 @@ module video_pipeline (
   /* verilator lint_off PINMISSING */
   apple_composite u_comp (
     .clk(CLK_14M),
+    .reset(reset),
     .ce(machine_ce),
     .video(VIDEO),
     .pixel_delay(2'd0),
@@ -224,17 +226,20 @@ module video_pipeline (
   // (RGB untouched) to slide the active window. The native RGB path is the
   // correctly centred reference and is never touched.
   //
-  // HSHIFT_BASE = 9 is the TB-measured mid-line alignment (tools/tb_hoffset.sv).
-  // However the decoder's HBL latency exceeds its RGB latency, so the window
-  // lands ~15px to the RIGHT of the picture: the right ~15px of the window is
-  // black (the right-edge black column). comp_hfix=1 trims the blanking
-  // hshift to 0, pulling the HBL_O rising edge left onto the picture's right
-  // edge and removing the column, without moving the picture. comp_hfix=0
-  // keeps the current hshift=9 behavior. Native path untouched.
+  // HSHIFT_BASE = 2 is the TB-measured mid-line alignment (tools/tb_hoffset.sv,
+  // re-measured after the native 80-col left-shift fix). The composite picture
+  // sat 7px LEFT of native in-window (bar centers 185/287/391 vs native
+  // 192/294/398) because HSHIFT_BASE=9 was originally tuned to the OLD (buggy)
+  // native window; the native fix slid that window 7 cycles left, so the
+  // composite window must slide 7 cycles left too (hshift 9 -> 2) to re-align.
+  // The decoder's HBL latency exceeds its RGB latency, leaving a right-edge
+  // black column (~9px, matching the native path's own right margin). comp_hfix=1
+  // trims the hshift to 0 (2px left of native, a debug value). Native path
+  // untouched.
   // ------------------------------------------------------------------
-  localparam HSHIFT_BASE = 9;  // TB-measured composite alignment delay
-  localparam HSHIFT_MAX  = HSHIFT_BASE + 3;  // pipe must reach 9 (13 stages, index 0..12)
-  reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 13 stages, index 0..12
+  localparam HSHIFT_BASE = 2;  // TB-measured composite alignment delay (was 9; -7 to track the native window shift)
+  localparam HSHIFT_MAX  = HSHIFT_BASE + 3;  // pipe reaches HSHIFT_BASE (6 stages, index 0..5)
+  reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 6 stages, index 0..5
   always @(posedge CLK_14M) begin
     if (machine_ce) begin
       hb_c_pipe <= {hb_c_pipe[HSHIFT_MAX-1:0], hb_c_out};

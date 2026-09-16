@@ -541,6 +541,7 @@ module apple2_top(
 
     video_pipeline vp(
         .CLK_14M(CLK_14M),
+        .reset(reset),
         .VIDEO(VIDEO),
         .HBL(HBL),
         .VBL(VBL),

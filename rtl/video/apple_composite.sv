@@ -66,6 +66,7 @@ module apple_composite #(
   parameter BURST_LEN   = 64
 )(
   input  wire        clk,        // 14.318 MHz, one composite sample per edge
+  input  wire        reset,      // decoder reset (machine reset, clk domain)
   input  wire        ce,         // sample valid (1 here; kept for reuse)
   input  wire        video,      // raw 1-bit Apple VIDEO
   input  wire [1:0]  pixel_delay,// source delay in composite samples (0..3)
@@ -182,41 +183,61 @@ module apple_composite #(
                     : (video_sample ? V_WHITE : V_BLACK);
 
   // ------------------------------------------------------------------
-  // Decoder
+  // Decoder - composite_decoder_v5a (SPC=4), the portable replacement for
+  // mister's composite_decoder (Stage 2, 2026-09-16).
+  //
+  // v5a derives its own line/field grid from the comp waveform (no
+  // hs_in/vs_in/hb_in/vb_in; no burst_start/burst_len - the Apple geometry
+  // is baked in: BURST_GATE=77, CLAMP_GATE=141 samples from the recovered
+  // line start). Its knob set differs from the legacy decoder:
+  //   legacy 8-bit signed `bright` (output-LSB offset)
+  //     -> v5a `brightness` Q2.13 volts (1 output LSB ~= 8192/255 ~= 32)
+  //   legacy 8-bit `contrast` (128 = unity, mid-grey centred) folded onto
+  //     v5a's Q16 volts-to-white gain (2857 = the legacy fixed luma_gain)
+  //   legacy `agc_en`/`i_mirror`/`chroma_short`/`luma_delay`: no v5a
+  //     equivalents - v5a black-clamps off the back porch and measures the
+  //     burst every line (always-AGC); its I/Q axes (AXIS=41, 57 deg from
+  //     burst) already use the correct chirality for this core's burst; its
+  //     luma/chroma delays are fixed internally. This core's 1-bit video
+  //     carries no chroma, so none of the dropped knobs can change the
+  //     picture. The apple_composite input ports remain (harness A/B) but
+  //     are no longer connected to the decoder.
+  //   legacy `comb_en` -> v5a `comb_mode` (0 = notch, 1 = two-line comb)
+  // The recovered hs_out/vs_out/hb_out/vb_out replace the legacy timing:
+  // the picture now sits on v5a's locked 912-sample grid (the re-anchor's
+  // F5 save/load hue fix depends on it). The encoder active window (hpos
+  // 222..781) sits inside v5a's decoded window (hpos 130..887), so the
+  // composite alignment (HSHIFT_BASE in video_pipeline.sv) may need
+  // re-tuning after this swap.
   // ------------------------------------------------------------------
+  wire signed [15:0] v5_brightness = 16'(signed'(bright) * 32'sd32);
+  wire [33:0] v5_contrast_prod = 34'(contrast) * 34'd2857;
+  wire [15:0] v5_contrast      = v5_contrast_prod[23:8];   // *2857/128
+
   assign comp_sample = comp;
   wire [7:0] r_i, g_i, b_i;
-  composite_decoder #(.SPC(4)) u_dec (
-    .clk         (clk),
-    .ce          (ce),
-    .comp        (comp),
-    .hs_in       (hs),
-    .vs_in       (vs),
-    .hb_in       (hb),
-    .vb_in       (vb),
-    .burst_start (BS),
-    .burst_len   (BL),
-    .sat         (sat),
-    .hue         (hue),
-    .i_mirror    (i_mirror),
-    .chroma_short(chroma_short),
-    .bright      (bright),
-    .contrast    (contrast),
-    .smear       (smear),
-    .luma_delay  (luma_delay),
-    .setup       (16'sd0),
-    .luma_gain   (16'sd2857),
-    .agc_en      (agc_en),
-    .comb_en     (comb_en),
-    .color_line  (color_line),
-    .ce_out      (ce_out),
-    .hs_out      (hs_out),
-    .vs_out      (vs_out),
-    .hb_out      (hb_out),
-    .vb_out      (vb_out),
-    .r_out       (r_i),
-    .g_out       (g_i),
-    .b_out       (b_i)
+  composite_decoder_v5a #(.SPC(4)) u_dec (
+    .clk          (clk),
+    .reset        (reset),
+    .ce           (ce),
+    .comp         (comp),
+    .sat          (sat),
+    .hue          (hue),
+    .chroma_trail (smear),
+    .sharpness    (4'd0),
+    .black_stretch(2'd0),
+    .brightness   (v5_brightness),
+    .contrast     (v5_contrast),
+    .comb_mode    (comb_en ? 2'd1 : 2'd0),
+    .ce_out       (ce_out),
+    .pix_out      (),
+    .hs_out       (hs_out),
+    .vs_out       (vs_out),
+    .hb_out       (hb_out),
+    .vb_out       (vb_out),
+    .r_out        (r_i),
+    .g_out        (g_i),
+    .b_out        (b_i)
   );
 
   assign r = r_i;
