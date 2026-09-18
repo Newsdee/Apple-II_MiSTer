@@ -287,9 +287,13 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 
 	.buttons(buttons),
 	.status(status),
-	// Bit 45 ("Savestates to SDCard") is forced low: the option is a disabled
-	// preview and the persistence path is not implemented.
-	.status_in({status[63:46],1'b0,status[44:43],virtual_keyboard_enabled_toggle?~status[42]:status[42],virtual_keyboard_transparency_cycle?virtual_keyboard_transparency_req:status[41:40],status[39:26],palette_toggle?palette_req:status[25:24],status[23:21],video_toggle?screen_mode_req:status[20:19],status[18:0]}),
+	// Bit 45 ("Savestates to SDCard"): live user toggle, On by default.
+	// The one-shot boot write (ss_boot_clear) sets it high; afterwards the
+	// HPS-held value passes through, so a user "Off" is kept until the next
+	// boot. miosd reads this bit on media mount (user_io_status_get("d", 1)
+	// = bit 45) and uses it as the process_ss enable: On = slot setup + load
+	// of existing .ss files + write-back; Off = fully off (upstream semantics).
+	.status_in({status[63:46],status[45] | ss_boot_clear,status[44:43],virtual_keyboard_enabled_toggle?~status[42]:status[42],virtual_keyboard_transparency_cycle?virtual_keyboard_transparency_req:status[41:40],status[39:26],palette_toggle?palette_req:status[25:24],status[23:21],video_toggle?screen_mode_req:status[20:19],status[18:0]}),
 	.status_set(video_toggle || palette_toggle || virtual_keyboard_transparency_cycle || virtual_keyboard_enabled_toggle || ss_boot_clear),
 	.status_menumask({ss_menumask[15:1], status[4]}),
 	.info_req(ss_info_req),

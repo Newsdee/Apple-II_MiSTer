@@ -60,9 +60,11 @@ module savestate_ui (
   reg       old_osd_save;
   reg       old_osd_restore;
 
-  // bit 7 gates the Save/Restore command lines, bit 8 stays 0 so the
-  // "Savestates to SDCard" line is permanently grayed out.
-  assign status_menumask = {7'd0, 1'b0, allow_ss, 7'd0};
+  // bit 7 gates the Save/Restore command lines; bit 8 = 1 keeps the
+  // "Savestates to SDCard" line selectable (the d8 flag grays it only
+  // while bit 8 is clear). The toggle (status bit 45) defaults On at
+  // boot; miosd uses it as the process_ss enable (Off = fully off).
+  assign status_menumask = {7'd0, 1'b1, allow_ss, 7'd0};
 
   always @(posedge clk) begin
     ss_save_req <= 1'b0;
