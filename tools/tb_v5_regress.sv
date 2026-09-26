@@ -1,12 +1,12 @@
 // tb_v5_regress.sv
 // =====================================================================
-// Stage 1 (TB-B) for composite_decoder_v5a: lock-in on the synthetic
+// Stage 1 (TB-B) for the v5a composite_decoder: lock-in on the synthetic
 // 912-sample line + black clamp on the porch + F5-LOAD hue check.
 //
 // Architecture (coexist, mirrors the plan): the SAME synthetic 1-bit Apple
 // VIDEO is encoded by apple_composite (which exposes the raw composite
 // comp_sample); comp_sample is fed to BOTH the current decoder (inside
-// apple_composite, loopback r/g/b) and composite_decoder_v5a (u_v5). This
+// apple_composite, loopback r/g/b) and composite_decoder (u_v5). This
 // keeps v5 and the current path on identical input for comparison.
 //
 // The sync/blank fed to apple_composite is the EXACT derivation the real
@@ -37,7 +37,7 @@
 //   --binary --timing -sv \
 //     tools/tb_v5_regress.sv \
 //     rtl/video/apple_composite.sv rtl/video/composite_decoder.sv \
-//     rtl/video/composite_decoder_v5a.sv \
+//     rtl/video/composite_decoder.sv \
 //     --Mdir tools/obj_dir_v5 -o tb_v5
 // =====================================================================
 `timescale 1ns/1ps
@@ -153,6 +153,7 @@ module tb_v5_regress;
     .i_mirror(i_mirror), .chroma_short(chroma_short), .smear(smear),
     .luma_delay(luma_delay), .agc_en(agc_en), .comb_en(comb_en),
     .r(cur_r), .g(cur_g), .b(cur_b),
+    .decoder_sel(1'b1),
     .ce_out(), .hs_out(), .vs_out(), .hb_out(), .vb_out(),
     .comp_sample(comp_sample)
   );
@@ -173,11 +174,13 @@ module tb_v5_regress;
 
   wire [7:0]  v5_r, v5_g, v5_b;
   wire        v5_ce, v5_pix, v5_hs, v5_vs, v5_hb, v5_vb;
-  composite_decoder_v5a u_v5 (
+  composite_decoder u_v5 (
     .clk(CLK), .reset(v5_reset), .ce(machine_ce), .comp(comp_sample),
+    .vs(vs_c), .vb(VBL),
     .sat(v5_sat), .hue(v5_hue), .chroma_trail(v5_chroma_trail),
     .sharpness(v5_sharpness), .black_stretch(v5_black_stretch),
-    .brightness(v5_brightness), .contrast(v5_contrast), .comb_mode(v5_comb_mode),
+    .brightness(v5_brightness), .contrast(v5_contrast),
+    .i_mirror(1'b1), .color_line(color_line), .comb_mode(v5_comb_mode),
     .ce_out(v5_ce), .pix_out(v5_pix), .hs_out(v5_hs), .vs_out(v5_vs),
     .hb_out(v5_hb), .vb_out(v5_vb), .r_out(v5_r), .g_out(v5_g), .b_out(v5_b)
   );

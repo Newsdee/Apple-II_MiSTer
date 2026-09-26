@@ -90,7 +90,6 @@ cd "$REPO"
   "$REPO/rtl/video/vga_controller.v" \
   "$REPO/rtl/video/apple_composite.sv" \
   "$REPO/rtl/video/composite_decoder.sv" \
-  "$REPO/rtl/video/composite_decoder_v5a.sv" \
   "$REPO/rtl/woz/disk_ii_woz.sv" \
   "$REPO/rtl/woz/flux_drive.v" \
   "$REPO/rtl/woz/woz_bram.sv" \

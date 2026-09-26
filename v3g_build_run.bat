@@ -82,7 +82,7 @@ if exist tools\obj_dir_v3g rd /s /q tools\obj_dir_v3g
 %VERILATOR% --binary --timing -sv -Wall -Wno-fatal --top tb_v5_regress ^
   --Mdir tools\obj_dir_v3g -o tb_v5 ^
   tools\tb_v5_regress.sv rtl\video\apple_composite.sv ^
-  rtl\video\composite_decoder.sv rtl\video\composite_decoder_v5a.sv
+  rtl\video\composite_decoder.sv
 if errorlevel 1 goto :build_failed
 echo build OK.
 goto :step4

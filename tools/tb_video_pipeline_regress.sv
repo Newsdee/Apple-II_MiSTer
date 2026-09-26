@@ -99,6 +99,8 @@ module tb_video_pipeline_regress;
   reg use_composite = 1'b0;
   wire [7:0] dut_r, dut_g, dut_b;
   wire dut_hs, dut_vs, dut_hbl, dut_vbl, dut_wait;
+  // The composite path is v5a only (legacy "Color TV" decoder removed
+  // 2026-09-24); its pixel-level behaviour is asserted by tb_v5_presets.
   video_pipeline dut (
     .CLK_14M(CLK), .VIDEO(VIDEO), .HBL(HBL), .VBL(VBL),
     .machine_ce(machine_ce),
@@ -108,6 +110,7 @@ module tb_video_pipeline_regress;
     .ioctl_addr(ioctl_addr), .ioctl_data(ioctl_data), .ioctl_index(ioctl_index),
     .ioctl_download(ioctl_download), .ioctl_wr(ioctl_wr), .ioctl_wait(dut_wait),
     .use_composite(use_composite), .comp_preset(2'd0), .comp_hfix(1'b0), .comp_hue_adj(5'd0),
+    .v5_hue_st(4'd4), .v5_bright_st(3'd1), .v5_sat_st(3'd2), .v5_contrast_st(2'd1), // neutral defaults (P6 knobs)
     .R(dut_r), .G(dut_g), .B(dut_b),
     .HS(dut_hs), .VS(dut_vs), .HBL_O(dut_hbl), .VBL_O(dut_vbl)
   );
@@ -127,7 +130,7 @@ module tb_video_pipeline_regress;
   logic [7:0] clean4_r, clean4_g, clean4_b, post4_r, post4_g, post4_b;
   logic       clean4_captured, post4_captured;
   logic [1:0] k_inv, k_after;
-  logic [7:0] k_inv_dec;
+  logic [23:0] k_inv_dec;
   logic       k_const = 1'b1;
   integer     fails = 0;
   // Synchronous re-anchor-edge sampler. The re-anchor writes on the
@@ -137,14 +140,14 @@ module tb_video_pipeline_regress;
   // constant itself during normal operation.
   reg        fall_flag;
   reg [1:0]  k_edge;
-  reg [7:0]  k_edge_dec;
+  reg [23:0] k_edge_dec;
   reg        k_edge_pulse;
   reg        p4_armed, p4_fired;
   always @(posedge CLK) begin
     fall_flag <= dut.u_comp.hs_d && !dut.u_comp.hs;
     if (fall_flag) begin
       k_edge       <= dut.u_comp.burst_cnt;
-      k_edge_dec   <= dut.u_comp.u_dec.phase;
+      k_edge_dec   <= dut.u_comp.u_dec_v5a.phase;
       k_edge_pulse <= 1'b1;
       if (p4_armed) begin
         k_after    <= dut.u_comp.burst_cnt;
@@ -244,16 +247,17 @@ module tb_video_pipeline_regress;
     else
       $display("FAIL (composite path trivial/constant)");
 
-    // Phase 2.5: capture the steady-state free-run phase at the derived
-    // hs falling edge over six consecutive lines. The line length is a
-    // whole number of subcarrier samples (912 = 4*228), so this value
-    // must be constant - the lockstep invariant the whole composite path
-    // relies on - and the decoder's 8-bit phase must carry the encoder's
-    // 2-bit burst counter in its top bits (common reset, common ce).
-    // These are the re-anchor constants used by apple_composite and
-    // composite_decoder: the board's steady-state value equals the TB's
-    // (tb_hbl_pwrup: the board's HBLANK steady-state line grid sits on a
-    // multiple of 912 from power-on, and 912 % 4 == 0).
+    // Phase 2.5: capture the steady-state phase at the derived hs
+    // falling edge over six consecutive lines. The line length is a whole
+    // number of subcarrier samples (912 = 4*228), so this value must be
+    // constant - the lockstep invariant the whole composite path relies
+    // on. k_inv is the encoder's 2-bit burst counter; k_edge_dec is the
+    // v5a decoder's 24-bit phase, re-anchored to a constant at every hs
+    // fall (common reset, common ce). These are the re-anchor constants
+    // used by apple_composite and composite_decoder: the board's
+    // steady-state value equals the TB's (tb_hbl_pwrup: the board's HBLANK
+    // steady-state line grid sits on a multiple of 912 from power-on, and
+    // 912 % 4 == 0).
     wait (field == 10 && lcnt == 200);
     repeat (1) @(posedge CLK);
     for (int i = 0; i < 6; i++) begin
@@ -266,10 +270,10 @@ module tb_video_pipeline_regress;
       @(posedge CLK);
     end
     $display("=== steady-state phase at hs fall (re-anchor constants) ===");
-    $display("K_enc=%02b K_dec=%03d  constant=%0b dec=={enc,6'b0}:%0b",
-             k_inv, k_inv_dec, k_const, (k_inv_dec === {k_inv, 6'b0}));
-    if (!k_const || (k_inv_dec !== {k_inv, 6'b0})) begin
-      $display("FAIL (steady-state phase not constant or pair offset wrong)");
+    $display("K_enc=%02b K_dec=%03d  constant=%0b",
+             k_inv, k_inv_dec, k_const);
+    if (!k_const) begin
+      $display("FAIL (steady-state phase not constant)");
       fails = fails + 1;
     end else
       $display("PASS (lockstep invariant holds)");
@@ -289,10 +293,10 @@ module tb_video_pipeline_regress;
              stall_changes, pre_r, pre_g, pre_b, post_r, post_g, post_b);
     begin : stall_check
       logic ok;
-      // pre R15 G72 Bff is the pre-fix (free-running) golden: the
-      // re-anchor must be a bit-identical no-op in normal operation.
+      // (The R15 G72 Bff golden was the legacy-decoder path; the v5a
+      // path's pixel values are asserted by tb_v5_presets. Here: no
+      // output movement during the stall and pre==post hue preservation.)
       ok = (pre_captured === 1'b1) && (stall_changes == 0) &&
-           (pre_r === 8'h15 && pre_g === 8'h72 && pre_b === 8'hff) &&
            (pre_r === post_r && pre_g === post_g && pre_b === post_b);
       if (ok) $display("PASS (frame holds during stall; hue preserved)");
       else begin

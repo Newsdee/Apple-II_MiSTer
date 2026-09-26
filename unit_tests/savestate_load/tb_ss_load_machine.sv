@@ -184,6 +184,7 @@ module tb_ss_load_machine;
     .COLOR_PALETTE(2'd0),
     .NTSC_VERTICAL_COMB(1'b1),
     .use_composite(1'b1),
+    .v5_hue_st(4'd4), .v5_bright_st(3'd1), .v5_sat_st(3'd2), .v5_contrast_st(2'd1), // zero-offset P6 defaults (2026-09-24 grid)
     .comp_preset(2'd0),
     .comp_hfix(1'b0),
     .comp_hue_adj(8'd0),
