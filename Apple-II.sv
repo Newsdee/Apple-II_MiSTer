@@ -67,7 +67,7 @@ parameter CONF_STR = {
 	"-;",
 	"S1,HDV;",
 	"-;",
-	"P0O4,Display Type,RGB Monitor,Color TV;",
+	"P0O3,Display Type,RGB Monitor,New Color TV;",
 	"D0P0OOP,RGB palette,NTSC //e,IIgs,AppleWin,Custom;",
 	"d0P0O12,Color TV Preset,Calibrated,Eyeballed,Punchy,Muted;",
 	"-;",
@@ -126,6 +126,15 @@ parameter CONF_STR = {
 	"P5rG,Save state (F6);",
 	"P5rH,Restore state (F5);",
 	"P5-;",
+	// v5a (New Color TV) fine-tune knobs: OFFSETS from the selected Color TV
+	// Preset base (P6 page; zero offsets at the default states).
+	"P6,V5 Knobs;",
+	"P6-;",
+	"P6O[67:64],V5 Hue,-16,-12,-8,-4,0,+4,+8,+12,+16;",
+	"P6oKM,V5 Bright,-16,0,+16,+32,+48,+64,+80,+96;",
+	"P6o[51:49],V5 Sat,-16,-8,0,+8,+16,+32;",
+	"P6o12,V5 Contrast,-16,0,+16,+32;",
+	"P6-;",
 	"-;",
 	"R0,Cold Reset;",
 	// Gamepad layout (ABXYLR + Start/Select), one slot per hps_io bus bit.
@@ -136,7 +145,8 @@ parameter CONF_STR = {
 	"jp,Y|P,B;",
 	// Save-state info strings (index 0 is the "I" marker): 1-4 active slot,
 	// 5-12 "State N saved/loaded" (5 + 2*slot + load), 13 Saturn, 14 invalid,
-	// 15 incompatible. Driven on hps_io.info by rtl/savestates/savestate_ui.sv.
+	// 15 incompatible, 16 "Savestates to SDCard" toggle Off. Driven on
+	// hps_io.info by rtl/savestates/savestate_ui.sv.
 	"I,",
 	"Active slot 1,",
 	"Active slot 2,",
@@ -152,7 +162,8 @@ parameter CONF_STR = {
 	"State 4 loaded,",
 	"Save states unavailable (Saturn),",
 	"Invalid or empty state,",
-	"Incompatible state format or CPU;",
+	"Incompatible state format or CPU,",
+	"Save states to SDCard is Off;",
 	"V,v",`BUILD_DATE
 };
 
@@ -170,7 +181,7 @@ pll pll
 
 /////////////////  HPS  ///////////////////////////
 
-wire [63:0] status;
+wire [127:0] status;
 wire  [1:0] buttons;
 wire        forced_scandoubler;
 wire [21:0] gamma_bus;
@@ -290,12 +301,23 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 	// Bit 45 ("Savestates to SDCard"): live user toggle, On by default.
 	// The one-shot boot write (ss_boot_clear) sets it high; afterwards the
 	// HPS-held value passes through, so a user "Off" is kept until the next
-	// boot. miosd reads this bit on media mount (user_io_status_get("d", 1)
-	// = bit 45) and uses it as the process_ss enable: On = slot setup + load
-	// of existing .ss files + write-back; Off = fully off (upstream semantics).
-	.status_in({status[63:46],status[45] | ss_boot_clear,status[44:43],virtual_keyboard_enabled_toggle?~status[42]:status[42],virtual_keyboard_transparency_cycle?virtual_keyboard_transparency_req:status[41:40],status[39:26],palette_toggle?palette_req:status[25:24],status[23:21],video_toggle?screen_mode_req:status[20:19],status[18:0]}),
+	// boot.
+	.status_in({status[127:68],
+		status[67:64] | (ss_boot_clear ? 4'b0100 : 4'b0000),  // P6O[67:64] V5 Hue  state 4 -> 0 (128-bit space)
+		status[63:57],
+		status[56:55],
+		status[54:52] | (ss_boot_clear ? 3'b001 : 3'b000),    // P6okm V5 Bright   state 1 -> 0
+		status[51:49] | (ss_boot_clear ? 3'b010 : 3'b000),     // P6o[51:49] V5 Sat  state 2 = 0 offset
+		status[48],
+		status[47:46],status[45] | ss_boot_clear,status[44:43],
+		virtual_keyboard_enabled_toggle?~status[42]:status[42],
+		virtual_keyboard_transparency_cycle?virtual_keyboard_transparency_req:status[41:40],
+		status[39:35],
+		status[34:33] | (ss_boot_clear ? 2'b01 : 2'b00),      // P6o12 V5 Contrast state 1 = 0 offset
+		status[32:26],palette_toggle?palette_req:status[25:24],status[23:21],
+		video_toggle?screen_mode_req:status[20:19],status[18:0]}),
 	.status_set(video_toggle || palette_toggle || virtual_keyboard_transparency_cycle || virtual_keyboard_enabled_toggle || ss_boot_clear),
-	.status_menumask({ss_menumask[15:1], status[4]}),
+	.status_menumask({ss_menumask[15:1], display_type}),  // bit0: "Color TV Preset" enabled in composite mode
 	.info_req(ss_info_req),
 	.info(ss_info),
 	.forced_scandoubler(forced_scandoubler),
@@ -441,9 +463,9 @@ wire [15:0] ss_menumask;
 wire        ss_info_req;
 wire [7:0]  ss_info;
 
-// One-shot startup clear: force the (unimplemented) "Savestates to SDCard"
-// bit 45 low in case an old configuration left it set. The counter
-// saturates at 16 so the clear pulse fires exactly once after reset.
+// "Savestates to SDCard" toggle
+wire        ss_sd_enabled = status[45];
+
 reg  [4:0] ss_boot_cnt;
 reg        ss_boot_clear;
 always @(posedge clk_sys) begin
@@ -461,6 +483,14 @@ reg [1:0] palette_req;
 
 assign screen_mode = status[20:19];
 assign palette_mode = status[25:24];
+
+// "Display Type" (OSD P0O3, status[3]): 0 = RGB Monitor, 1 = New Color TV
+// (the composite path; composite_decoder = v5a. The legacy "Color TV"
+// decoder was removed entirely 2026-09-24 - see
+// ../Apple-II-Verilog_MiSTer/docs/video/COMPOSITE_PRESETS_REFERENCE.md);
+// status[4] is unused.
+wire display_type = status[3];
+assign use_composite = display_type;
 
 always @(posedge clk_sys) begin
 	reg old_toggle = 0;
@@ -520,10 +550,14 @@ apple2_top apple2_top
 	.SCREEN_MODE( status[20:19] ),
 	.TEXT_COLOR( text_color ),
 	.COLOR_PALETTE(status[25:24]),
-	.use_composite(status[4]),
+	.use_composite(use_composite),
 	.comp_preset(status[2:1]),
 	.comp_hfix(status[62]),
 	.comp_hue_adj({1'b0, status[61:57]} << 1),
+	.v5_hue_st(status[67:64]),
+	.v5_bright_st(status[54:52]),
+	.v5_sat_st(status[51:49]),
+	.v5_contrast_st(status[34:33]),
 	.NTSC_VERTICAL_COMB(~status[32]),
 	.PALMODE(status[22]),
 	.ROMSWITCH(~status[23]),
@@ -790,7 +824,7 @@ assign ss_rdata = (ss_addr == 10'd10) ? {63'd0, active_cpu} : top_ss_rdata;
 savestate_ui savestate_ui (
 	.clk(clk_sys),
 	.reset(dd_reset),
-	.allow_ss(!saturn_5_inslot && !dd_reset && !ioctl_download && !ss_busy),
+	.allow_ss(!saturn_5_inslot && !dd_reset && !ioctl_download && !ss_busy && ss_sd_enabled),
 	.ss_busy(ss_busy),
 	.ss_done(ss_done),
 	.ss_error(ss_error),
@@ -798,6 +832,7 @@ savestate_ui savestate_ui (
 	.osd_slot(status[47:46]),
 	.osd_save(status[48]),
 	.osd_restore(status[49]),
+	.sd_toggle(status[45]),
 	.hk_save(save_request),
 	.hk_load(load_request),
 	.ss_save_req(ui_save_req),
@@ -811,7 +846,7 @@ savestate_ui savestate_ui (
 savestate_manager state_manager (
 	.clk(clk_sys), .reset(dd_reset),
 	.request_save(ui_save_req), .request_load(ui_load_req),
-	.allow_save_state(!saturn_5_inslot),
+	.allow_save_state(!saturn_5_inslot && ss_sd_enabled),
 	.cpu_type(current_cpu), .cpu_frozen(cpu_frozen),
 	.stall(), .machine_ce(machine_ce), .busy(ss_busy), .done(ss_done),
 	.error(ss_error), .error_code(ss_error_code), .locked_cpu_type(ss_locked_cpu),

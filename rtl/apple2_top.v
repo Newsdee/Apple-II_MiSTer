@@ -17,7 +17,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-module apple2_top(
+module apple2_top (
     CLK_14M,
     CLK_50M,
     reset_cold,
@@ -57,6 +57,10 @@ module apple2_top(
     COLOR_PALETTE,
     NTSC_VERTICAL_COMB,
     use_composite,
+    v5_hue_st,
+    v5_bright_st,
+    v5_sat_st,
+    v5_contrast_st,
     comp_preset,
     comp_hfix,
     comp_hue_adj,
@@ -180,11 +184,21 @@ module apple2_top(
     input  [1:0]  COLOR_PALETTE;	// 00: Original (//e NTSC), 01: //gs, 02: AppleWin, 03: //c PAL
     input         NTSC_VERTICAL_COMB;
     // Composite video switch (see rtl/video/video_pipeline.sv).
-    //   use_composite: "Color sharpness" RGB/Composite (Apple-II_woz status[4]).
+    //   use_composite: "Display Type" != RGB Monitor (Apple-II_MiSTer
+    //                  status[4:3] != 0). Selects the composite (NTSC) path
+    //                  over the native RGB path.
     //   comp_preset:   0=Calibrated 1=Eyeballed 2=Punchy 3=Muted (status[2:1]).
-    //   comp_hfix:     A/B composite right-edge fix (0=current hshift=9,
+    //   comp_hfix:     A/B composite right-edge fix (0=current hshift,
     //                  1=trimmed hshift=0). Composite path only.
     input         use_composite;
+    // v5a (New Color TV) OSD tuning knob states (OSD page P6):
+    // pass-through to video_pipeline; the composite path is v5a and the
+    // P6 offsets always apply. Default states (hue 4, bright 1, sat 2,
+    // contrast 1) are zero offsets: the picture is exactly the preset.
+    input  [3:0]  v5_hue_st;
+    input  [2:0]  v5_bright_st;
+    input  [2:0]  v5_sat_st;
+    input  [1:0]  v5_contrast_st;
     input  [1:0]  comp_preset;
     input         comp_hfix;
     input  [4:0]  comp_hue_adj;
@@ -563,6 +577,10 @@ module apple2_top(
         .ioctl_wr(ioctl_wr),
         .ioctl_wait(ioctl_wait),
         .use_composite(use_composite),
+        .v5_hue_st(v5_hue_st),
+        .v5_bright_st(v5_bright_st),
+        .v5_sat_st(v5_sat_st),
+        .v5_contrast_st(v5_contrast_st),
         .comp_preset(comp_preset),
         .comp_hfix(comp_hfix),
         .comp_hue_adj(comp_hue_adj),
@@ -630,16 +648,10 @@ module apple2_top(
 
     assign DISK_ACT = ~(D1_ACTIVE | D2_ACTIVE);
 
-    // WOZ Disk II slot controller (rtl/woz/disk_ii_woz.sv): replaces
-    // disk_ii + drive_ii x2 + the track buffer bus.  Reads the .woz image
-    // over the hps_io SD block interface (one channel per drive); the
-    // hps_io streaming protocol is exactly what the WOZ expects, and
-    // sd_blk_cnt is left 0 (single-block requests).  IMG_MOUNTED is a
-    // LEVEL (the wrapper latches the hps_io mount pulse).  DD_RESET is
-    // reset_cold: a cold reset re-seats the drives; a warm reset leaves
-    // them spinning (real-machine behavior).
+    // WOZ Disk II slot controller (rtl/woz/disk_ii_woz.sv)
+    wire clk_14m_disk = CLK_14M & machine_ce & ~cpu_stall;
     disk_ii_woz disk(
-        .CLK_14M(CLK_14M),
+        .CLK_14M(clk_14m_disk),
         .RESET(reset),
         .DD_RESET(reset_cold),
         .PHASE_ZERO(PHASE_ZERO),

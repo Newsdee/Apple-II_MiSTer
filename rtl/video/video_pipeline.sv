@@ -10,9 +10,11 @@
 //     pipeline). Byte-identical to the pre-composite build.
 //   * Composite (use_composite = 1): apple_composite encodes the 1-bit
 //     video to an NTSC composite stream in THIS 14 MHz domain, and its
-//     loopback decoder turns it back to RGB. The 4-preset `case`
-//     (Calibrated / Eyeballed / Punchy / Muted) selects the decoder knobs.
-//     No knobs are exposed outside this module.
+//     loopback decoder turns it back to RGB. The 4-preset tables
+//     (Calibrated / Eyeballed / Punchy / Muted) select the decoder knobs;
+//     on the v5a "New Color TV" path the P6 OSD states add fine-tune
+//     offsets on top of the preset base (the legacy path is unchanged).
+//     See ../Apple-II-Verilog_MiSTer/docs/V5A_KNOB_MAPPING_PLAN.md.
 //
 // The composite path runs in the 14 MHz domain (one sample per clock), the
 // level-2-validated domain, with 4x the timing slack of a 57 MHz mixer
@@ -23,7 +25,11 @@
 
 `default_nettype none
 
-module video_pipeline (
+// The composite path is the v5a decoder (composite_decoder). The legacy
+// "Color TV" decoder was removed 2026-09-24 - see
+// ../Apple-II-Verilog_MiSTer/docs/video/COMPOSITE_PRESETS_REFERENCE.md.
+module video_pipeline
+(
   input  wire        CLK_14M,
   // raw mono tap from the apple2 core
   input  wire        VIDEO,
@@ -54,10 +60,20 @@ module video_pipeline (
   input  wire        reset,        // machine reset -> composite decoder
   input  wire        machine_ce,
   // composite switch
-  input  wire        use_composite,  // "Color sharpness" RGB/Composite (status[4])
+  input  wire        use_composite,  // "Display Type" != RGB Monitor (status[4:3] != 0)
   input  wire [1:0]  comp_preset,    // 0=Calibrated 1=Eyeballed 2=Punchy 3=Muted
-  input  wire        comp_hfix,      // A/B: composite right-edge fix (0=current hshift=9, 1=trimmed hshift=0)
+  input  wire        comp_hfix,      // retained for config compatibility; correction is always active
   input  wire [4:0]  comp_hue_adj,   // debug: composite hue adjust 0-31 (added to base hue)
+  // v5a (New Color TV) OSD fine-tune knobs (P6 page, status bits [67:64] hue,
+  // [54:52] bright, [51:49] sat, [34:33] contrast): state indices mapping to
+  // OFFSETS from the selected preset's knob base; default states 4/1/2/1 are
+  // zero offsets (the picture is exactly the selected preset; 2026-09-24
+  // grid). Applied on the composite (v5a) path.
+  // Drive explicitly in TBs (unconnected = X).
+  input  wire [3:0]  v5_hue_st,      // (s-4)*4  -> -16..+16  (state 4 = no offset)
+  input  wire [2:0]  v5_bright_st,   // (s-1)*16-16 -> -16..+96 (state 1 = no offset)
+  input  wire [2:0]  v5_sat_st,      // {-16,-8,0,+8,+16,+32} (state 2 = no offset)
+  input  wire [1:0]  v5_contrast_st, // (s-1)*16-16 -> -16..+32 (state 1 = no offset)
   // final outputs (same names/widths vga_controller gave apple2_top)
   output wire [7:0]  R,
   output wire [7:0]  G,
@@ -148,7 +164,15 @@ module video_pipeline (
               (vblank_lines <  VSYNC_FRONT_PORCH + VSYNC_LINES);
 
   // ------------------------------------------------------------------
-  // 4-preset knob selection (the ONLY place the presets live).
+  // 4-preset knob selection (the ONLY place the presets live): one table
+  // per decoder. The legacy "Color TV" table is hardware-tuned in the legacy
+  // demod frame. The v5a "New Color TV" table uses the same sat/bright/
+  // contrast units (apple_composite does the v5a unit conversion) with the
+  // hue column re-based to the v5a demod frame: the v5a verified-correct
+  // frame sits at hue 0 while the legacy rows sit at ~112..130, so the
+  // legacy RELATIVE offsets vs Calibrated (Eyeballed +13, Punchy +15,
+  // Muted -3) are carried over. Calibrated carries the legacy Calibrated
+  // numbers (user decision 2026-09-23).
   // Common to all presets: i_mirror=1 (chirality fix), chroma_short=0, pixel_delay=0,
   // luma_gain=2857, setup=0, agc=1 (all fixed inside apple_composite).
   // ------------------------------------------------------------------
@@ -157,12 +181,39 @@ module video_pipeline (
   reg        p_chroma_short;
   reg  [3:0] p_smear, p_luma_delay;
   reg        p_agc;
+  // v5a preset base rows (before the P6 fine-tune offsets are applied).
+  reg  [7:0] v5a_sat, v5a_hue, v5a_bright, v5a_contrast;
+  // 8-bit clamps for the base+offset sums (16-bit signed intermediates).
+  function signed [7:0] clamp_s8(input signed [15:0] v);
+    if      (v >  16'sd127)  clamp_s8 = 8'sh81;   // -127
+    else if (v < -16'sd127)  clamp_s8 = 8'sh81;   // -127
+    else                     clamp_s8 = v[7:0];
+  endfunction
+  function [7:0] clamp_u8(input signed [15:0] v);
+    if      (v >  16'sd255)  clamp_u8 = 8'hFF;
+    else if (v <  16'sd0)    clamp_u8 = 8'h00;
+    else                     clamp_u8 = v[7:0];
+  endfunction
+  // Map P6 knob states to knob OFFSETS. Default states (hue 4, bright 1,
+  // sat 2, contrast 1) are zero offsets: the picture is exactly the
+  // selected preset.
+  wire signed [15:0] k_hue_c          = ($signed({9'd0, v5_hue_st}) - 9'sd4) * 16'sd4;     // -16..+16, state 4 = 0
+  wire signed [15:0] k_bright_c       = ($signed({6'd0, v5_bright_st}) - 6'sd1) * 16'sd16 - 16'sd16; // -16..+96, state 1 = 0
+  logic signed [15:0] k_sat_off_c;
+  always @(*) begin
+    case (v5_sat_st)
+      3'd0: k_sat_off_c = -16'sd16;
+      3'd1: k_sat_off_c = -16'sd8;
+      3'd2: k_sat_off_c = 16'sd0;
+      3'd3: k_sat_off_c = 16'sd8;
+      3'd4: k_sat_off_c = 16'sd16;
+      default: k_sat_off_c = 16'sd32;   // states 5..7 (OSD list ends at 5): +32
+    endcase
+  end
+  wire signed [15:0] k_contrast_off_c = ($signed({4'd0, v5_contrast_st}) - 4'sd1) * 16'sd16 - 16'sd16; // -16..+32, state 1 = 0
   always @* begin
-    // defaults = neutral base (Punchy = base + hue); each preset overrides
-    p_sat        = 8'd128;
-    p_hue        = 8'd0;
-    p_bright     = 8'd0;
-    p_contrast   = 8'd128;
+    // v5a preset table (2026-09-24 grid: Calibrated neutral with the +8 hue
+    // base, Muted desaturated); each preset overrides the v5a_* base rows.
     p_i_mirror   = 1'b1;
     p_chroma_short = 1'b0;
     p_smear      = 4'd0;
@@ -175,6 +226,31 @@ module video_pipeline (
       2'd3: begin p_sat=8'd80;  p_hue=8'd112;  p_bright=8'hFB; p_contrast=8'd190; end   // Muted (Eyeballed, sat=80)
       default:   begin end
     endcase
+    // v5a base: Calibrated row by default; rows 1-3 override (hue re-based).
+    // 2026-09-24 retune #2 (measured, tools/tb_v5a_tune.sv): the first
+    // order retune (8'h90/136) overshot (flat white 104 vs legacy 255).
+    // Flat-field transfer: v5a neutral (b=0, c=128) = black 0 / white
+    // 254 vs legacy Calibrated 0 / 255 => all presets use neutral luma
+    // (bright 0, contrast 128); presets differ by sat/hue and P6 V5
+    // knobs provide fine trim. Base hue +8 (hardware: Calibrated matches
+    // the RGB monitor palette). See
+    // ../Apple-II-Verilog_MiSTer/docs/video/COMPOSITE_PRESETS_REFERENCE.md section 2c.
+    v5a_sat        = 8'd80;
+    v5a_hue        = 8'd8;
+    v5a_bright     = 8'd0;
+    v5a_contrast   = 8'd128;
+    case (comp_preset)
+      2'd1: begin v5a_sat=8'd51;  v5a_hue=8'd21;  v5a_bright=8'd0;  v5a_contrast=8'd128; end  // Eyeballed (+13 vs Calibrated, base +8)
+      2'd2: begin v5a_sat=8'd100; v5a_hue=8'd23;  v5a_bright=8'd0;  v5a_contrast=8'd128; end   // Punchy (+15 vs Calibrated, base +8)
+      2'd3: begin v5a_sat=8'd48;  v5a_hue=8'd5;   v5a_bright=8'd0; v5a_contrast=8'd128; end   // Muted (desaturated, -3 vs Calibrated, base +8)
+      default:   begin end
+    endcase
+    // v5a knobs = preset base + P6 offset: hue wraps mod 256, the rest
+    // clamps to the 8-bit port range.
+    p_hue      = v5a_hue + k_hue_c[7:0];
+    p_bright   = clamp_s8($signed(v5a_bright) + k_bright_c);
+    p_sat      = clamp_u8($signed({8'd0, v5a_sat}) + k_sat_off_c);   // zero-extend: values >= 128 sign-extend negative as 8-bit signed
+    p_contrast = clamp_u8($signed({8'd0, v5a_contrast}) + k_contrast_off_c); // zero-extend: same trap (177 = -79 as 8-bit signed)
   end
 
   // ------------------------------------------------------------------
@@ -186,7 +262,7 @@ module video_pipeline (
   // in the core build (the 14 MHz domain is always enabled; comp_sample is
   // the raw encoder stream). Left unconnected on purpose.
   /* verilator lint_off PINMISSING */
-  apple_composite u_comp (
+  apple_composite #(.V5_AXIS(V5_AXIS), .V5_Q_NEG(V5_Q_NEG)) u_comp (
     .clk(CLK_14M),
     .reset(reset),
     .ce(machine_ce),
@@ -226,27 +302,30 @@ module video_pipeline (
   // (RGB untouched) to slide the active window. The native RGB path is the
   // correctly centred reference and is never touched.
   //
-  // HSHIFT_BASE = 2 is the TB-measured mid-line alignment (tools/tb_hoffset.sv,
-  // re-measured after the native 80-col left-shift fix). The composite picture
-  // sat 7px LEFT of native in-window (bar centers 185/287/391 vs native
-  // 192/294/398) because HSHIFT_BASE=9 was originally tuned to the OLD (buggy)
-  // native window; the native fix slid that window 7 cycles left, so the
-  // composite window must slide 7 cycles left too (hshift 9 -> 2) to re-align.
-  // The decoder's HBL latency exceeds its RGB latency, leaving a right-edge
-  // black column (~9px, matching the native path's own right margin). comp_hfix=1
-  // trims the hshift to 0 (2px left of native, a debug value). Native path
-  // untouched.
+  // The required delay is decoder-specific (tools/tb_hoffset.sv, measured
+  // 2026-09-23 against the native path, field 2 of a stable frame):
+  //   v5a composite_decoder    : HSHIFT_V5 = 9
+  //     One fewer sample clock exposes the final Apple pixel and aligns the
+  //     decoded bars with the native active window.
   // ------------------------------------------------------------------
-  localparam HSHIFT_BASE = 2;  // TB-measured composite alignment delay (was 9; -7 to track the native window shift)
-  localparam HSHIFT_MAX  = HSHIFT_BASE + 3;  // pipe reaches HSHIFT_BASE (6 stages, index 0..5)
-  reg  [HSHIFT_MAX:0] hb_c_pipe, hs_c_pipe;  // 6 stages, index 0..5
+  // TB-measured composite alignment delays. PARAMETERS (not localparams) so
+  // tb_hoffset can override them per instance when re-measuring.
+  parameter HSHIFT_V5     = 9;  // v5a decoder (measured 2026-09-26)
+  // v5a colour-frame knobs, threaded to apple_composite
+  // (tb_v5_color sweep + hardware 2026-09-23): AXIS=0 matches the legacy
+  // frame; Q_NEG=0 keeps the natural Q sign (1 = green<->purple mirror).
+  parameter V5_AXIS  = 0;
+  parameter V5_Q_NEG = 0;
+  localparam HSHIFT_MAX  = HSHIFT_V5;
+  localparam HSHIFT_PIPE = HSHIFT_MAX + 3;  // pipe must reach HSHIFT_MAX (+3 margin)
+  reg  [HSHIFT_PIPE:0] hb_c_pipe, hs_c_pipe;  // stages 0..HSHIFT_PIPE
   always @(posedge CLK_14M) begin
     if (machine_ce) begin
-      hb_c_pipe <= {hb_c_pipe[HSHIFT_MAX-1:0], hb_c_out};
-      hs_c_pipe <= {hs_c_pipe[HSHIFT_MAX-1:0], hs_c_out};
+      hb_c_pipe <= {hb_c_pipe[HSHIFT_PIPE-1:0], hb_c_out};
+      hs_c_pipe <= {hs_c_pipe[HSHIFT_PIPE-1:0], hs_c_out};
     end
   end
-  wire [3:0] hshift_idx = comp_hfix ? 4'd0 : HSHIFT_BASE[3:0];  // 0 (fix) or 9 (current)
+  wire [3:0] hshift_idx = HSHIFT_V5[3:0];
   wire       hb_c_s = hb_c_pipe[hshift_idx];
   wire       hs_c_s = hs_c_pipe[hshift_idx];
 
