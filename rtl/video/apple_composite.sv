@@ -124,11 +124,15 @@ module apple_composite #(
 
   // Keep burst and black-clamp references active during vertical sync lines.
   logic signed [23:0] comp;
+  // Front porch = the machine samples before the next HS rising edge 
+  // needs adjustment since composite adds more delay
+  wire in_fporch = (hcnt >= 10'd714) && (hcnt < 10'd841);
+
   assign comp = hs
                      ? V_SYNC
                     : (hb && in_burst && color_line)
                      ? (burst_phase ? V_BURST : -V_BURST)
-                    : (hb)
+                    : (hb && !in_fporch)
                      ? V_BLANK
                     : (video_sample ? V_WHITE : V_BLACK);
 

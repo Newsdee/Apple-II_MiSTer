@@ -185,7 +185,7 @@ localparam [10:0] CLAMP_GATE  = 11'(tenths_us(99));   // Apple: black measured f
 // 68-sample hs pulse at hblank 130..197, so in hcnt units: post-sync HBL =
 // 0..219, active picture = 220..779, pre-sync HBL + sync lead = 780..911.
 localparam [10:0] HB_END      = 11'(tenths_us(154));   // Apple: 220 (HBL end, post-sync)
-localparam [HCNT_W-1:0] FRONT_PORCH = HCNT_W'(132);    // Apple: 132 (pre-sync HBL + sync lead)
+localparam [HCNT_W-1:0] FRONT_PORCH = HCNT_W'(124);    // Apple: 132; 124 extends the active window 8 samples right so the DE tail decodes the next-line HBL white. Lock is sync-edge based and unaffected; HB_END untouched.
 
 localparam signed [23:0] SLICE = 24'sd209715;
 localparam signed [23:0] TIP_DECAY = 24'sd2;

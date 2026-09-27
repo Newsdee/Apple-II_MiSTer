@@ -246,7 +246,11 @@ module video_pipeline
   /* verilator lint_on PINMISSING */
 
   // Delay composite timing, not RGB, to align the decoded active window.
-  parameter HSHIFT_V5     = 9;  // align the composite and native left edges
+  // HS feed is the RAW encoder sync (hs_c, machine 130); the decoder-regenerated
+  // hs_c_out carried +13 internal latency and made the composite HS 17 samples
+  // late vs native.
+  // hs_c + (HSHIFT_V5 + 1) stages = 136 = native vga HS at the DUT.
+  parameter HSHIFT_V5     = 5;  // align the composite and native left edges
   // Hardware-tested v5 color orientation.
   parameter V5_AXIS  = 0;
   parameter V5_Q_NEG = 0;
@@ -256,7 +260,7 @@ module video_pipeline
   always @(posedge CLK_14M) begin
     if (machine_ce) begin
       hb_c_pipe <= {hb_c_pipe[HSHIFT_PIPE-1:0], hb_c_out};
-      hs_c_pipe <= {hs_c_pipe[HSHIFT_PIPE-1:0], hs_c_out};
+      hs_c_pipe <= {hs_c_pipe[HSHIFT_PIPE-1:0], hs_c};  // raw sync, not hs_c_out
     end
   end
   wire [3:0] hshift_idx = HSHIFT_V5[3:0];
