@@ -16,9 +16,6 @@ module vga_controller(
     input             COLOR_LINE,
     input      [1:0]  SCREEN_MODE,
     input      [1:0]  COLOR_PALETTE,
-    input             GRAY_SEAM_FIX,
-    input             SEAM_RUN_FILL,
-    input             SEAM_RUN_WIDE,
     input             RUN_FILL_OK,
     input             NTSC_VERTICAL_COMB,
     input             HBL,
@@ -45,6 +42,9 @@ localparam integer VGA_ACTIVE = 282 * 2;
 localparam integer VGA_FRONT_PORCH = 130;
 localparam integer VBL_TO_VSYNC = 33;
 localparam integer VGA_VSYNC_LINES = 3;
+localparam GRAY_SEAM_FIX = 1'b1;
+localparam SEAM_RUN_FILL = 1'b1;
+localparam SEAM_RUN_WIDE = 1'b0;
 
 reg [5:0] shift_reg = 0;
 reg last_hbl = 0;

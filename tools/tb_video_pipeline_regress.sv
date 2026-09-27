@@ -68,11 +68,9 @@ module tb_video_pipeline_regress;
   wire        COLOR_LINE = 1'b1;  // color on: exercises the burst (phase 2)
   wire [1:0]  SCREEN_MODE   = 2'b00;  // color
   wire [1:0]  COLOR_PALETTE = 2'b00;
-  wire        GRAY_SEAM_FIX  = 1'b1;
-  wire        SEAM_RUN_FILL  = 1'b1;
-  wire        SEAM_RUN_WIDE  = 1'b0;
   wire        RUN_FILL_OK    = 1'b1;
-  wire        NTSC_VERTICAL_COMB = 1'b0;
+  wire        NTSC_VERTICAL_COMB = 1'b0;  // vga ref-DUT gate only
+  wire [1:0]  v5_comb_mode       = 2'd1;  // state 1 = Off (as before)
   wire [24:0] ioctl_addr     = 25'd0;
   wire [7:0]  ioctl_data     = 8'd0;
   wire [7:0]  ioctl_index    = 8'd0;
@@ -85,8 +83,7 @@ module tb_video_pipeline_regress;
   vga_controller u_ref (
     .CLK_14M(CLK), .VIDEO(VIDEO), .COLOR_LINE(COLOR_LINE),
     .SCREEN_MODE(SCREEN_MODE), .COLOR_PALETTE(COLOR_PALETTE),
-    .GRAY_SEAM_FIX(GRAY_SEAM_FIX), .SEAM_RUN_FILL(SEAM_RUN_FILL),
-    .SEAM_RUN_WIDE(SEAM_RUN_WIDE), .RUN_FILL_OK(RUN_FILL_OK),
+    .RUN_FILL_OK(RUN_FILL_OK),
     .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
     .HBL(HBL), .VBL(VBL),
     .VGA_HS(ref_hs), .VGA_VS(ref_vs), .VGA_HBL(ref_hbl), .VGA_VBL(ref_vbl),
@@ -106,11 +103,11 @@ module tb_video_pipeline_regress;
     .machine_ce(machine_ce),
     .COLOR_LINE(COLOR_LINE), .SCREEN_MODE(SCREEN_MODE), .COLOR_PALETTE(COLOR_PALETTE),
     .RUN_FILL_OK(RUN_FILL_OK),
-    .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
+    .v5_comb_mode(v5_comb_mode), .v5_black_stretch_st(2'd0), .v5_smoothing_st(1'b0), .v5_sharpness_st(1'b0),
     .ioctl_addr(ioctl_addr), .ioctl_data(ioctl_data), .ioctl_index(ioctl_index),
     .ioctl_download(ioctl_download), .ioctl_wr(ioctl_wr), .ioctl_wait(dut_wait),
     .use_composite(use_composite), .comp_preset(2'd0), .comp_hfix(1'b0), .comp_hue_adj(5'd0),
-    .v5_hue_st(4'd4), .v5_bright_st(3'd1), .v5_sat_st(3'd2), .v5_contrast_st(2'd1), // neutral defaults (P6 knobs)
+    .v5_hue_st(4'd0), .v5_bright_st(2'd0), .v5_sat_st(3'd0), .v5_contrast_st(2'd0), // neutral defaults (NTSC knobs; state 0 = zero offset)
     .R(dut_r), .G(dut_g), .B(dut_b),
     .HS(dut_hs), .VS(dut_vs), .HBL_O(dut_hbl), .VBL_O(dut_vbl)
   );

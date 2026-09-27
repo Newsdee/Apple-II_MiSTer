@@ -150,7 +150,7 @@ module tb_v5_regress;
     .hs(hs_c), .vs(vs_c), .hb(HBL), .vb(VBL), .color_line(color_line),
     .sat(sat), .hue(hue), .bright(bright), .contrast(contrast),
     .i_mirror(i_mirror), .chroma_short(chroma_short), .smear(smear),
-    .luma_delay(luma_delay), .agc_en(agc_en), .comb_en(comb_en),
+    .luma_delay(luma_delay), .agc_en(agc_en), .comb_mode(comb_en ? 2'd1 : 2'd0), .black_stretch(2'd0), .sharpness(4'd0),
     .r(cur_r), .g(cur_g), .b(cur_b),
     .decoder_sel(1'b1),
     .ce_out(), .hs_out(), .vs_out(), .hb_out(), .vb_out(),

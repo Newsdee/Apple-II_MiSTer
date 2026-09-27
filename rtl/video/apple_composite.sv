@@ -64,7 +64,9 @@ module apple_composite #(
   input  wire [3:0]  smear,      // chroma trail length, 0 = off
   input  wire [3:0]  luma_delay, // samples (set BELOW chroma path delay)
   input  wire        agc_en,     // track level off the burst
-  input  wire        comb_en,    // vertical comb filter enable (1-line chroma average)
+  input  wire [1:0]  comb_mode,  // vertical comb filter mode: 0=off(notch) 1=two-line 2=adaptive
+  input  wire [1:0]  black_stretch, // 0=off 1=1/4 2=1/2 3=3/4 (darkness stretch)
+  input  wire [3:0]  sharpness,     // aperture peaking 0=off..15 (max ~9 dB)
   output wire [7:0]  r, g, b,
   output wire        ce_out, hs_out, vs_out, hb_out, vb_out,
   // Q2.21 composite sample stream; one sample is produced per ce pulse.
@@ -154,13 +156,13 @@ module apple_composite #(
     .sat          (sat),
     .hue          (hue),
     .chroma_trail (smear),
-    .sharpness    (4'd0),
-    .black_stretch(2'd0),
+    .sharpness    (sharpness),
+    .black_stretch(black_stretch),
     .brightness   (v5_brightness),
     .contrast     (v5_contrast),
     .i_mirror     (i_mirror),
     .color_line   (color_line),
-    .comb_mode    (comb_en ? 2'd1 : 2'd0),
+    .comb_mode    (comb_mode),
     .ce_out       (ce_v5),
     .pix_out      (),
     .hs_out       (hs_v5),

@@ -184,12 +184,6 @@ localparam [10:0] CLAMP_GATE  = 11'(tenths_us(99));   // Apple: black measured f
 // sync leading edge). The 912-sample line has a 352-sample HBL with the
 // 68-sample hs pulse at hblank 130..197, so in hcnt units: post-sync HBL =
 // 0..219, active picture = 220..779, pre-sync HBL + sync lead = 780..911.
-// HB_END + FRONT_PORCH == 352 == the HBL length: the two blank regions tile
-// the HBL exactly, the regenerated HBL rising edge (hcnt 780) lands on the
-// machine's native HBL edge, and the active window matches the native
-// picture exactly. (The old generic-NTSC values - HB_END 130 / FRONT_PORCH
-// 24 - put the active window 92 samples wide off the real picture, leaving
-// the decoded frame shifted with large black margins.)
 localparam [10:0] HB_END      = 11'(tenths_us(154));   // Apple: 220 (HBL end, post-sync)
 localparam [HCNT_W-1:0] FRONT_PORCH = HCNT_W'(132);    // Apple: 132 (pre-sync HBL + sync lead)
 

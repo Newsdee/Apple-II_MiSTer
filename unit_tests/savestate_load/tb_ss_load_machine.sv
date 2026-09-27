@@ -182,9 +182,9 @@ module tb_ss_load_machine;
     .SCREEN_MODE(2'd0),
     .TEXT_COLOR(1'b0),
     .COLOR_PALETTE(2'd0),
-    .NTSC_VERTICAL_COMB(1'b1),
+    .v5_comb_mode(2'd0), .v5_black_stretch_st(2'd0), .v5_smoothing_st(1'b0), .v5_sharpness_st(1'b0),
     .use_composite(1'b1),
-    .v5_hue_st(4'd4), .v5_bright_st(3'd1), .v5_sat_st(3'd2), .v5_contrast_st(2'd1), // zero-offset P6 defaults (2026-09-24 grid)
+    .v5_hue_st(4'd4), .v5_bright_st(2'd1), .v5_sat_st(3'd2), .v5_contrast_st(2'd1), // P6 knob states from the 2026-09-24 grid (carry hidden offsets under the current state-0 grid; C4 is liveness-only)
     .comp_preset(2'd0),
     .comp_hfix(1'b0),
     .comp_hue_adj(8'd0),

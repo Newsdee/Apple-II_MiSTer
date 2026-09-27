@@ -67,9 +67,18 @@ parameter CONF_STR = {
 	"-;",
 	"S1,HDV;",
 	"-;",
-	"P0O3,Display Type,RGB Monitor,New Color TV;",
+	"P0O3,Display Type,RGB Monitor,Color TV;",
 	"D0P0OOP,RGB palette,NTSC //e,IIgs,AppleWin,Custom;",
 	"d0P0O12,Color TV Preset,Calibrated,Eyeballed,Punchy,Muted;",
+	// NTSC fine-tune knobs (for Color TV mode): these are offsets from presets	"P0O[67:64],NTSC Hue,0,-16,-12,-8,-4,+4,+8,+12,+16;",
+	"P0oKL,NTSC Bright,0,-16,+16,+32;",
+	"P0o[51:49],NTSC Sat,0,-16,-8,+8,+16,+32;",
+	"P0o12,NTSC Contrast,0,-16,+16,+32;",
+	"P0-;",
+	"P0o[56:55],NTSC Comb,On,Off,Adaptive,Adaptive;",
+	"P0o[27:26],NTSC Black Stretch,Off,25%,50%,75%;",
+	"P0o0,NTSC Smoothing,Off,On;",
+	"P0oG,NTSC Sharpness,Off,On;",
 	"-;",
 	"P1,System & BIOS;",
 	"P1-;",
@@ -91,7 +100,6 @@ parameter CONF_STR = {
 	"P2OL,Lo-Res Text,Clean,Composite;",
 	"P2oPT,Comp Hue Adj,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15;",
 	"P2oU,Comp right-edge fix,Off,On;",
-	"P2o0,NTSC Vert. Comb Filter,On,Off;",
 	"P2-;",
 	"P2O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;", 
 	"P2OCD,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
@@ -126,15 +134,6 @@ parameter CONF_STR = {
 	"P5rG,Save state (F6);",
 	"P5rH,Restore state (F5);",
 	"P5-;",
-	// v5a (New Color TV) fine-tune knobs: OFFSETS from the selected Color TV
-	// Preset base (P6 page; zero offsets at the default states).
-	"P6,V5 Knobs;",
-	"P6-;",
-	"P6O[67:64],V5 Hue,-16,-12,-8,-4,0,+4,+8,+12,+16;",
-	"P6oKM,V5 Bright,-16,0,+16,+32,+48,+64,+80,+96;",
-	"P6o[51:49],V5 Sat,-16,-8,0,+8,+16,+32;",
-	"P6o12,V5 Contrast,-16,0,+16,+32;",
-	"P6-;",
 	"-;",
 	"R0,Cold Reset;",
 	// Gamepad layout (ABXYLR + Start/Select), one slot per hps_io bus bit.
@@ -303,18 +302,20 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 	// HPS-held value passes through, so a user "Off" is kept until the next
 	// boot.
 	.status_in({status[127:68],
-		status[67:64] | (ss_boot_clear ? 4'b0100 : 4'b0000),  // P6O[67:64] V5 Hue  state 4 -> 0 (128-bit space)
+		status[67:64],                                          // P0O[67:64] NTSC Hue  state 0 = 0 offset
 		status[63:57],
-		status[56:55],
-		status[54:52] | (ss_boot_clear ? 3'b001 : 3'b000),    // P6okm V5 Bright   state 1 -> 0
-		status[51:49] | (ss_boot_clear ? 3'b010 : 3'b000),     // P6o[51:49] V5 Sat  state 2 = 0 offset
-		status[48],
+		status[56:55],                                        // P0o[56:55] NTSC Comb  state 0 = On (two-line)
+		status[54:52],                                          // bit 54 now free; P0oKL NTSC Bright [53:52] state 0 = 0 offset
+		status[51:49],                                          // P0o[51:49] NTSC Sat  state 0 = 0 offset
+		status[48],                                              // P0oG NTSC Sharpness  state 0 = Off
 		status[47:46],status[45] | ss_boot_clear,status[44:43],
 		virtual_keyboard_enabled_toggle?~status[42]:status[42],
 		virtual_keyboard_transparency_cycle?virtual_keyboard_transparency_req:status[41:40],
 		status[39:35],
-		status[34:33] | (ss_boot_clear ? 2'b01 : 2'b00),      // P6o12 V5 Contrast state 1 = 0 offset
-		status[32:26],palette_toggle?palette_req:status[25:24],status[23:21],
+		status[34:33],                                          // P0o12 NTSC Contrast state 0 = 0 offset
+		status[32],status[31:28],                                  // P0o0 NTSC Smoothing  state 0 = Off
+		status[27:26],                                             // P0o[27:26] NTSC Black Stretch  state 0 = Off
+		palette_toggle?palette_req:status[25:24],status[23:21],
 		video_toggle?screen_mode_req:status[20:19],status[18:0]}),
 	.status_set(video_toggle || palette_toggle || virtual_keyboard_transparency_cycle || virtual_keyboard_enabled_toggle || ss_boot_clear),
 	.status_menumask({ss_menumask[15:1], display_type}),  // bit0: "Color TV Preset" enabled in composite mode
@@ -484,7 +485,7 @@ reg [1:0] palette_req;
 assign screen_mode = status[20:19];
 assign palette_mode = status[25:24];
 
-// "Display Type" (OSD P0O3, status[3]): 0 = RGB Monitor, 1 = New Color TV
+// "Display Type" (OSD P0O3, status[3]): 0 = RGB Monitor, 1 = Color TV
 // (the composite path; composite_decoder = v5a. The legacy "Color TV"
 // decoder was removed entirely 2026-09-24 - see
 // ../Apple-II-Verilog_MiSTer/docs/video/COMPOSITE_PRESETS_REFERENCE.md);
@@ -555,10 +556,13 @@ apple2_top apple2_top
 	.comp_hfix(status[62]),
 	.comp_hue_adj({1'b0, status[61:57]} << 1),
 	.v5_hue_st(status[67:64]),
-	.v5_bright_st(status[54:52]),
+	.v5_bright_st(status[53:52]),
 	.v5_sat_st(status[51:49]),
 	.v5_contrast_st(status[34:33]),
-	.NTSC_VERTICAL_COMB(~status[32]),
+	.v5_comb_mode(status[56:55]),
+	.v5_black_stretch_st(status[27:26]),
+	.v5_smoothing_st(status[32]),
+	.v5_sharpness_st(status[48]),
 	.PALMODE(status[22]),
 	.ROMSWITCH(~status[23]),
 

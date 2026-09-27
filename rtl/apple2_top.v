@@ -55,7 +55,10 @@ module apple2_top (
     video_switch,
     palette_switch,
     COLOR_PALETTE,
-    NTSC_VERTICAL_COMB,
+    v5_comb_mode,
+    v5_black_stretch_st,
+    v5_smoothing_st,
+    v5_sharpness_st,
     use_composite,
     v5_hue_st,
     v5_bright_st,
@@ -182,7 +185,10 @@ module apple2_top (
     output        video_switch;
     output        palette_switch;
     input  [1:0]  COLOR_PALETTE;	// 00: Original (//e NTSC), 01: //gs, 02: AppleWin, 03: //c PAL
-    input         NTSC_VERTICAL_COMB;
+    input  [1:0]  v5_comb_mode;        // 0=off(notch) 1=two-line 2=adaptive (3=adaptive)
+    input  [1:0]  v5_black_stretch_st; // 0=off 1=1/4 2=1/2 3=3/4
+    input         v5_smoothing_st;     // 1 = 8-sample chroma trail
+    input         v5_sharpness_st;     // 1 = max aperture peaking
     // Composite video switch (see rtl/video/video_pipeline.sv).
     //   use_composite: "Display Type" != RGB Monitor (Apple-II_MiSTer
     //                  status[4:3] != 0). Selects the composite (NTSC) path
@@ -191,12 +197,14 @@ module apple2_top (
     //   comp_hfix:     A/B composite right-edge fix (0=current hshift,
     //                  1=trimmed hshift=0). Composite path only.
     input         use_composite;
-    // v5a (New Color TV) OSD tuning knob states (OSD page P6):
+    // v5a (Color TV) OSD tuning knob states (OSD page 0, under Color TV
+    // Preset; the old P6 page was merged in 2026-09-27):
     // pass-through to video_pipeline; the composite path is v5a and the
-    // P6 offsets always apply. Default states (hue 4, bright 1, sat 2,
-    // contrast 1) are zero offsets: the picture is exactly the preset.
+    // knob offsets always apply. State 0 is the zero offset (the picture
+    // is exactly the selected preset; 2026-09-26: 0 is the first/default
+    // value).
     input  [3:0]  v5_hue_st;
-    input  [2:0]  v5_bright_st;
+    input  [1:0]  v5_bright_st;
     input  [2:0]  v5_sat_st;
     input  [1:0]  v5_contrast_st;
     input  [1:0]  comp_preset;
@@ -568,7 +576,10 @@ module apple2_top (
         .SCREEN_MODE(SCREEN_MODE),
         .COLOR_PALETTE(COLOR_PALETTE),
         .RUN_FILL_OK(RUN_FILL_OK),
-        .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
+        .v5_comb_mode(v5_comb_mode),
+        .v5_black_stretch_st(v5_black_stretch_st),
+        .v5_smoothing_st(v5_smoothing_st),
+        .v5_sharpness_st(v5_sharpness_st),
         // for custom palette loader
         .ioctl_addr(ioctl_addr),
         .ioctl_data(ioctl_data),
