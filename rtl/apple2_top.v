@@ -55,10 +55,7 @@ module apple2_top (
     video_switch,
     palette_switch,
     COLOR_PALETTE,
-    v5_comb_mode,
-    v5_black_stretch_st,
-    v5_smoothing_st,
-    v5_sharpness_st,
+    NTSC_VERTICAL_COMB,
     use_composite,
     v5_hue_st,
     v5_bright_st,
@@ -185,10 +182,7 @@ module apple2_top (
     output        video_switch;
     output        palette_switch;
     input  [1:0]  COLOR_PALETTE;	// 00: Original (//e NTSC), 01: //gs, 02: AppleWin, 03: //c PAL
-    input  [1:0]  v5_comb_mode;        // 0=off(notch) 1=two-line 2=adaptive (3=adaptive)
-    input  [1:0]  v5_black_stretch_st; // 0=off 1=1/4 2=1/2 3=3/4
-    input         v5_smoothing_st;     // 1 = 8-sample chroma trail
-    input         v5_sharpness_st;     // 1 = max aperture peaking
+    input         NTSC_VERTICAL_COMB;  // old-style 2-line comb gate: 1=On 0=Off, common to RGB and Color TV
     // Composite video switch (see rtl/video/video_pipeline.sv).
     //   use_composite: "Display Type" != RGB Monitor (Apple-II_MiSTer
     //                  status[4:3] != 0). Selects the composite (NTSC) path
@@ -576,10 +570,7 @@ module apple2_top (
         .SCREEN_MODE(SCREEN_MODE),
         .COLOR_PALETTE(COLOR_PALETTE),
         .RUN_FILL_OK(RUN_FILL_OK),
-        .v5_comb_mode(v5_comb_mode),
-        .v5_black_stretch_st(v5_black_stretch_st),
-        .v5_smoothing_st(v5_smoothing_st),
-        .v5_sharpness_st(v5_sharpness_st),
+        .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
         // for custom palette loader
         .ioctl_addr(ioctl_addr),
         .ioctl_data(ioctl_data),

@@ -153,7 +153,6 @@ module tb_v5_regress;
     .i_mirror(i_mirror), .chroma_short(chroma_short), .smear(smear),
     .luma_delay(luma_delay), .agc_en(agc_en), .comb_mode(comb_en ? 2'd1 : 2'd0), .black_stretch(2'd0), .sharpness(4'd0),
     .r(cur_r), .g(cur_g), .b(cur_b),
-    .decoder_sel(1'b1),
     .ce_out(), .hs_out(), .vs_out(), .hb_out(), .vb_out(),
     .comp_sample(comp_sample)
   );

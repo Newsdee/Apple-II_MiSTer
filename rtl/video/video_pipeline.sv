@@ -16,10 +16,7 @@ module video_pipeline
   input  wire [1:0]  SCREEN_MODE,
   input  wire [1:0]  COLOR_PALETTE,
   input  wire        RUN_FILL_OK,
-  input  wire [1:0]  v5_comb_mode,        // 0=off(notch) 1=two-line 2=adaptive (3=adaptive)
-  input  wire [1:0]  v5_black_stretch_st, // 0=off 1=1/4 2=1/2 3=3/4
-  input  wire        v5_smoothing_st,     // 1 = 8-sample chroma trail
-  input  wire        v5_sharpness_st,     // 1 = max aperture peaking
+  input  wire        NTSC_VERTICAL_COMB,  // old-style 2-line comb gate: 1=On(two-line) 0=Off, common to RGB and Color TV
   // Custom palette loader.
   input  wire [24:0] ioctl_addr,
   input  wire [7:0]  ioctl_data,
@@ -60,7 +57,7 @@ module video_pipeline
     .SCREEN_MODE(SCREEN_MODE),
     .COLOR_PALETTE(COLOR_PALETTE),
     .RUN_FILL_OK(RUN_FILL_OK),
-    .NTSC_VERTICAL_COMB(v5_comb_mode != 2'd1),  // vga gate = comb on; state 1 = Off
+    .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),  // old-style gate: On->1 Off->0 (common to both modes)
     .HBL(HBL),
     .VBL(VBL),
     .VGA_HS(hs_vga),
@@ -116,7 +113,7 @@ module video_pipeline
   reg  [7:0] p_sat, p_hue, p_bright, p_contrast;
   reg        p_i_mirror;
   reg        p_chroma_short;
-  reg  [3:0] p_smear, p_luma_delay;
+  reg  [3:0] p_smear, p_sharpness, p_luma_delay;
   reg        p_agc;
   // Preset bases before P6 offsets.
   reg  [7:0] v5a_sat, v5a_hue, v5a_bright, v5a_contrast;
@@ -179,14 +176,15 @@ module video_pipeline
     // Fixed decoder controls shared by all presets.
     p_i_mirror   = 1'b1;
     p_chroma_short = 1'b0;
-    p_smear      = v5_smoothing_st ? 4'd3 : 4'd0;  // 1 = 8-sample (2^3) trail
+    p_smear      = 4'd0;   // preset default: smoothing off (Eyeballed/Muted override)
+    p_sharpness  = 4'd0;   // preset default: no aperture peaking (Muted overrides)
     p_luma_delay = 4'd0;
     p_agc        = 1'b1;
     case (comp_preset)
       2'd0: begin p_sat=8'd80;  p_hue=8'd115; p_bright=8'hF2; p_contrast=8'd177; end   // Calibrated (hardware-tuned; hue=112 base +3)
-      2'd1: begin p_sat=8'd51;  p_hue=8'd128;  p_bright=8'sd10; p_contrast=8'd170; end  // Eyeballed (hardware-tuned)
+      2'd1: begin p_sat=8'd51;  p_hue=8'd128;  p_bright=8'sd10; p_contrast=8'd170; p_smear=4'd3; end  // Eyeballed (hardware-tuned; smoothing on)
       2'd2: begin p_sat=8'd100; p_hue=8'd130; p_bright=8'sd9; p_contrast=8'd255; end   // Punchy (AppleWin-like)
-      2'd3: begin p_sat=8'd80;  p_hue=8'd112;  p_bright=8'hFB; p_contrast=8'd190; end   // Muted (Eyeballed, sat=80)
+      2'd3: begin p_sat=8'd80;  p_hue=8'd112;  p_bright=8'hFB; p_contrast=8'd190; p_smear=4'd3; p_sharpness=4'd15; end   // Muted (Eyeballed, sat=80; smoothing+sharpness on)
       default:   begin end
     endcase
     // Hardware-tuned v5 preset bases.
@@ -232,9 +230,9 @@ module video_pipeline
     .smear(p_smear),
     .luma_delay(p_luma_delay),
     .agc_en(p_agc),
-    .comb_mode(v5_comb_mode),
-    .black_stretch(v5_black_stretch_st),
-    .sharpness(v5_sharpness_st ? 4'd15 : 4'd0),
+    .comb_mode(NTSC_VERTICAL_COMB ? 2'd1 : 2'd0), 
+    .black_stretch(2'd0),  // Black Stretch hardwired off
+    .sharpness(p_sharpness),
     .r(r_comp),
     .g(g_comp),
     .b(b_comp),
@@ -255,7 +253,10 @@ module video_pipeline
   parameter V5_AXIS  = 0;
   parameter V5_Q_NEG = 0;
   localparam HSHIFT_MAX  = HSHIFT_V5;
-  localparam HSHIFT_PIPE = HSHIFT_MAX + 3;  // pipe must reach HSHIFT_MAX (+3 margin)
+  // Shift the composite HS/HBL window by the same amount when smoothing is on so the picture stays centered. 
+  localparam [3:0] HSHIFT_SMOOTH = 4'd7;
+  localparam HSHIFT_PIPE = HSHIFT_MAX + HSHIFT_SMOOTH + 3;  // pipe must reach the max index (+3 margin)
+  // NOTE: HSHIFT_V5 + HSHIFT_SMOOTH must stay <= 15 (4-bit index space).
   reg  [HSHIFT_PIPE:0] hb_c_pipe, hs_c_pipe;  // stages 0..HSHIFT_PIPE
   always @(posedge CLK_14M) begin
     if (machine_ce) begin
@@ -263,7 +264,8 @@ module video_pipeline
       hs_c_pipe <= {hs_c_pipe[HSHIFT_PIPE-1:0], hs_c};  // raw sync, not hs_c_out
     end
   end
-  wire [3:0] hshift_idx = HSHIFT_V5[3:0];
+  wire [3:0] hshift_idx = HSHIFT_V5[3:0]
+                        + ((p_smear != 4'd0) ? HSHIFT_SMOOTH : 4'd0);
   wire       hb_c_s = hb_c_pipe[hshift_idx];
   wire       hs_c_s = hs_c_pipe[hshift_idx];
 

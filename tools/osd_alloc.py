@@ -5,28 +5,46 @@ Takes a MiSTer CONF_STR (a .sv file that contains one, or a raw string) and
 decodes every option's status-bit allocation. This removes the guesswork when
 adding/moving an OSD option: run it before and after a change and diff.
 
-Encoding (verified against this project's known status[] usages):
-  Option header:  P<page><bank><bits>
-    <page>  : OSD page number (0-9) - menu organisation only.
-    <bank>  : 'O' = lower bank (offset 0), 'o' = upper bank (offset +32).
-    <bits>  : one char (1-bit) or two chars '<lo><hi>' (range [hi:lo]).
-  Char -> bit (within the bank):
-    '0'-'9' -> 0-9
-    'A'-'Z' -> 10-35
-    'a'-'z' -> 36-61
-  Actual status bit = bank_offset + char_value.
-  A two-char spec '<lo><hi>' covers [hi:lo] (hi-lo+1 bits).
+The parser models the REAL current MiSTer OSD (verified against
+Main_MiSTer_clean_disk_order/user_io.cpp: user_io_status_bits() and the
+option-registration loop, plus menu.cpp):
 
-Non-option lines:
-  P<page>,<title>;   page title (no bits)
-  P<page>-;          separator (no bits)
+  Header normalization (done for every option string):
+    * leading 'H'/'D'/'h'/'d' + flag-char pairs are stripped (2 chars each);
+    * a leading 'P<page>' (exactly 2 chars) is skipped.
+
+  After normalization, the first char selects the option kind:
+    'O'/'o'  : status option. If the next char is 'X' (ARM by-arm variant)
+               it is skipped. Bit spec follows. Bank: 'o' = upper (+32).
+    'R'/'T'  : toggle/reset ACTION (one bit only). Bank: 'R'/'T' = lower,
+               'r'/'t' = upper (+32). Spec = the single char after the letter.
+    'F'/'S'  : file-load / image-mount (no status bits).
+    'J'/'C'  : joystick names / cheats (no status bits).
+    'V'      : version string (no bits).
+    'I'      : OSD info string (no bits).
+    '-'      : separator.
+    'P<page>' (alone) : page title / navigation entry (no bits).
+
+  Bit spec (user_io_status_bits):
+    * '[hi:lo]' or '[n]'  : ABSOLUTE status bit range; the bank letter is
+      IGNORED. Valid: hi>lo, bits <= 127 (status register is 128 bits).
+      e.g. 'P0o[27:26]' -> status[27:26] (lower bank!), 'P0O[67:64]' is legal.
+    * char spec : first char = start bit, second char (optional) = end bit.
+      Chars: '0'-'9' -> 0-9, 'A'-'V' -> 10-31 (nothing else is valid).
+      If the second char is invalid the option is a single bit.
+      Lower-bank bank adds 0, upper ('o') adds 32.
+      Invalid: start/end > 127, or (two-char) end <= start, or > 8 bits.
+      e.g. 'OQR' -> Q=26 (LSB), R=27 (MSB) -> status[27:26].
+
+  The OSD prints "Invalid OSD option: <line>" to the console for specs that
+  fail validation; this tool reports them as 'invalid'.
 
 Usage:
   osd_alloc.py FILE.sv                 decode the CONF_STR in a .sv file
   osd_alloc.py --str '...{...}...'     decode a raw CONF_STR string
   osd_alloc.py FILE.sv --json          machine-readable output
   osd_alloc.py --diff A.sv B.sv        diff two allocations (added/removed/moved)
-  osd_alloc.py FILE.sv --free          print free status bits (0-63)
+  osd_alloc.py FILE.sv --free          print free status bits (0-127)
   osd_alloc.py FILE.sv --find 63:62    check which option owns a bit range
 """
 
@@ -36,13 +54,15 @@ import json
 
 
 def char_to_bit(c):
-    """Map a single option char to its in-bank bit value, or None."""
-    if c.isdigit():
+    """Map a single OSD bit-spec char to its bit value, or None if invalid.
+
+    Valid chars: '0'-'9' -> 0-9 and 'A'-'V' -> 10-31 only (user_io.cpp
+    user_io_status_bits). Anything else is an invalid spec.
+    """
+    if '0' <= c <= '9':
         return int(c)
-    if 'A' <= c <= 'Z':
+    if 'A' <= c <= 'V':
         return 10 + (ord(c) - ord('A'))
-    if 'a' <= c <= 'z':
-        return 36 + (ord(c) - ord('a'))
     return None
 
 
@@ -53,86 +73,154 @@ def extract_confstr_strings(text):
     return re.findall(r'"((?:[^"\\]|\\.)*)"', block)
 
 
+def parse_spec(spec, ex):
+    """Parse a bit spec per user_io_status_bits().
+
+    Returns (start, end) absolute bits, or None if the OSD would reject it.
+    """
+    if spec.startswith('['):
+        mb = re.fullmatch(r'\[(\d+):(\d+)\]', spec)
+        if mb:
+            end, start = int(mb.group(1)), int(mb.group(2))
+        else:
+            mb = re.fullmatch(r'\[(\d+)\]', spec)
+            if not mb:
+                return None
+            start = end = int(mb.group(1))
+        if start > 127 or end > 127 or end <= start:
+            return None
+    else:
+        v0 = char_to_bit(spec[0]) if spec else None
+        if v0 is None:
+            return None
+        start = v0
+        v1 = char_to_bit(spec[1]) if len(spec) > 1 else None
+        if v1 is None:
+            end = start  # single bit
+        else:
+            end = v1
+        if ex:
+            start += 32
+            end += 32
+        if start > 127 or end > 127:
+            return None
+        if v1 is not None and end <= start:
+            return None  # two-char spec must be a real range
+    if end - start > 8:  # max 8 bits per option
+        return None
+    return start, end
+
+
 def decode_option(opt_str):
     """Decode one option string.
 
-    Returns a dict with keys: kind, page, label, values, and (for options)
-    bank, lo, hi, bits (a set of status bit indices). Returns None for
-    titles/separators.
+    Returns a dict with keys: kind, header, label, and (for bit-owning kinds)
+    lo, hi, bits. Kinds: option, action, title, sep, file, media, joystick,
+    cheats, version, info, invalid.
     """
     s = opt_str.strip().rstrip(';').strip()
     parts = [p.strip() for p in s.split(',')]
     header = parts[0]
     label = parts[1] if len(parts) > 1 else ''
     values = parts[2:] if len(parts) > 2 else []
+    base = {'kind': None, 'header': header, 'label': label}
 
-    # Page title: P<page>  (nothing after the page digit before the comma)
-    if re.fullmatch(r'P\d', header):
-        return {'kind': 'title', 'page': int(header[1]), 'label': label}
-    # Separator: P<page>-
-    if re.fullmatch(r'P\d-', header):
-        return {'kind': 'sep', 'page': int(header[1])}
+    # No comma at all: raw info strings etc. (e.g. "State 1 saved").
+    if ',' not in opt_str:
+        base['kind'] = 'info'
+        return base
 
-    m = re.fullmatch(r'P(\d)([Oo])([0-9A-Za-z]{1,2})', header)
-    if not m:
-        return {'kind': 'unknown', 'header': header, 'label': label}
+    p = header
+    # Strip leading H/D/h/d flag pairs (2 chars each).
+    while len(p) >= 3 and p[0] in 'HDhd':
+        p = p[2:]
+    # Skip the 'P<page>' prefix (exactly 2 chars).
+    if p[0] == 'P':
+        p = p[2:]
 
-    page = int(m.group(1))
-    bank = m.group(2)
-    bits_str = m.group(3)
-    offset = 32 if bank == 'o' else 0
+    if not p:
+        base['kind'] = 'title'
+        return base
+    if p[0] == '-':
+        base['kind'] = 'sep'
+        return base
+    if p[0] == 'P' and len(p) >= 2 and p[1].isdigit():
+        # Page navigation / page title entry.
+        base['kind'] = 'title'
+        base['page'] = int(p[1])
+        return base
 
-    vals = [char_to_bit(c) for c in bits_str]
-    if any(v is None for v in vals):
-        return {'kind': 'unknown', 'header': header, 'label': label}
+    ex = False
+    if p[0] in 'RTtr':
+        ex = p[0].islower()
+        spec = p[1:2]
+        rng = parse_spec(spec, ex) if spec else None
+        if rng is None or rng[0] != rng[1]:
+            base['kind'] = 'invalid'
+            base['note'] = 'toggle/reset action needs exactly one valid bit'
+            return base
+        base.update(kind='action', lo=rng[0], hi=rng[1], bits={rng[0]})
+        return base
 
-    lo = min(vals)
-    hi = max(vals)
-    alo = offset + lo
-    ahi = offset + hi
-    if ahi > 63:
-        return {'kind': 'oob', 'header': header, 'label': label,
-                'lo': alo, 'hi': ahi}
+    if p[0] in 'Oo':
+        ex = (p[0] == 'o')
+        spec = p[2:] if len(p) > 1 and p[1] == 'X' else p[1:]
+        rng = parse_spec(spec, ex) if spec else None
+        if rng is None:
+            base['kind'] = 'invalid'
+            base['note'] = 'OSD would print "Invalid OSD option" for this spec'
+            return base
+        base.update(kind='option', lo=rng[0], hi=rng[1],
+                    bits=set(range(rng[0], rng[1] + 1)),
+                    bank='upper' if rng[0] >= 32 else 'lower',
+                    values=values)
+        return base
 
-    return {
-        'kind': 'option',
-        'page': page,
-        'bank': 'upper' if bank == 'o' else 'lower',
-        'lo': alo,
-        'hi': ahi,
-        'bits': set(range(alo, ahi + 1)),
-        'label': label,
-        'values': values,
-        'header': header,
-    }
+    if p[0] in 'FS':
+        base['kind'] = 'media'  # file load / image mount: no status bits
+        return base
+    if p[0] in 'JC':
+        base['kind'] = 'joystick' if p[0] in 'Jj' else 'cheats'
+        return base
+    if p[0] == 'V':
+        base['kind'] = 'version'
+        return base
+    if p[0] == 'I':
+        base['kind'] = 'info'
+        return base
+
+    base['kind'] = 'unknown'
+    return base
 
 
 def decode_all(strings):
-    """Decode all option strings into a list of records (titles/seps included)."""
+    """Decode all option strings into a list of records."""
     out = []
     for st in strings:
         rec = decode_option(st)
-        if rec is not None:
-            rec['raw'] = st
-            out.append(rec)
+        rec['raw'] = st
+        out.append(rec)
     return out
 
 
+BIT_KINDS = ('option', 'action')
+
+
 def find_conflicts(records):
-    """Return a list of (bit, [labels]) for bits owned by >1 option."""
+    """Return {bit: [labels]} for bits owned by more than one entry."""
     owner = {}
     for r in records:
-        if r.get('kind') != 'option':
+        if r.get('kind') not in BIT_KINDS:
             continue
         for b in r['bits']:
             owner.setdefault(b, []).append(r['label'] or r['header'])
     return {b: labels for b, labels in sorted(owner.items()) if len(labels) > 1}
 
 
-def free_bits(records, width=64):
+def free_bits(records, width=128):
     used = set()
     for r in records:
-        if r.get('kind') == 'option':
+        if r.get('kind') in BIT_KINDS:
             used |= r['bits']
     return [b for b in range(width) if b not in used]
 
@@ -146,19 +234,28 @@ def format_bits(r):
 def render(records):
     lines = []
     for r in records:
-        if r['kind'] == 'title':
-            lines.append('  page %d: %s' % (r['page'], r['label']))
-        elif r['kind'] == 'sep':
+        k = r['kind']
+        if k in BIT_KINDS:
+            if k == 'option':
+                nv = len(r.get('values', []))
+                nb = r['hi'] - r['lo'] + 1
+                flag = '' if nv <= (1 << nb) else '  <-- %d values need >%d bits' % (nv, nb)
+                bank = r.get('bank', '?')
+                lines.append('  %-8s %-14s %-8s %s%s' %
+                             (r['header'], format_bits(r), bank, r['label'], flag))
+            else:
+                lines.append('  %-8s %-14s %-8s %s (toggle/reset action)' %
+                             (r['header'], format_bits(r), '-', r['label']))
+        elif k == 'title':
+            lines.append('  page %s: %s' % (r.get('page', '?'), r['label']))
+        elif k == 'sep':
             lines.append('  ---')
-        elif r['kind'] == 'option':
-            nv = len(r['values'])
-            nb = r['hi'] - r['lo'] + 1
-            flag = '' if (nv <= (1 << nb)) else '  <-- %d values need >%d bits' % (nv, nb)
-            lines.append('  %-8s %-14s %-10s %s%s' %
-                         (r['header'], format_bits(r), r['bank'],
-                          r['label'], flag))
+        elif k == 'invalid':
+            lines.append('  ! %-8s %-14s %s  <-- %s' %
+                         (r['header'], r['label'], r['raw'], r.get('note', '')))
         else:
-            lines.append('  ? %-8s %s' % (r.get('header', '?'), r.get('label', '')))
+            lines.append('  %-8s %-14s %s (%s, no bits)' %
+                         (r['header'], r['label'], r['raw'], k))
     return '\n'.join(lines)
 
 
@@ -201,8 +298,8 @@ def main(argv):
             return 2
         ra = load_records(positional[0])
         rb = load_records(positional[1])
-        ma = {r['header']: r for r in ra if r.get('kind') == 'option'}
-        mb = {r['header']: r for r in rb if r.get('kind') == 'option'}
+        ma = {r['header']: r for r in ra if r.get('kind') in BIT_KINDS}
+        mb = {r['header']: r for r in rb if r.get('kind') in BIT_KINDS}
         for h in sorted(set(ma) | set(mb)):
             if h not in ma:
                 print('  + %s  %s  (added)' % (h, format_bits(mb[h])))
@@ -211,12 +308,13 @@ def main(argv):
             elif ma[h]['bits'] != mb[h]['bits']:
                 print('  ~ %s  %s -> %s  (moved)' %
                       (h, format_bits(ma[h]), format_bits(mb[h])))
-        # conflicts in the new one
         c = find_conflicts(rb)
         if c:
             print('  CONFLICTS in B:')
             for b, labels in c.items():
                 print('    bit %d: %s' % (b, ' vs '.join(labels)))
+        else:
+            print('  no bit conflicts in B')
         return 0
 
     if len(positional) < 1:
@@ -252,7 +350,7 @@ def main(argv):
         want = set(range(lo, hi + 1))
         owners = []
         for r in records:
-            if r.get('kind') == 'option' and (r['bits'] & want):
+            if r.get('kind') in BIT_KINDS and (r['bits'] & want):
                 owners.append('%s (%s)' % (r['header'], format_bits(r)))
         print('bits %s owned by: %s' %
               (find_range, ', '.join(owners) if owners else 'FREE'))

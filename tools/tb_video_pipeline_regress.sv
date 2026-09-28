@@ -69,8 +69,7 @@ module tb_video_pipeline_regress;
   wire [1:0]  SCREEN_MODE   = 2'b00;  // color
   wire [1:0]  COLOR_PALETTE = 2'b00;
   wire        RUN_FILL_OK    = 1'b1;
-  wire        NTSC_VERTICAL_COMB = 1'b0;  // vga ref-DUT gate only
-  wire [1:0]  v5_comb_mode       = 2'd1;  // state 1 = Off (as before)
+  wire        NTSC_VERTICAL_COMB = 1'b0;  // vga ref-DUT gate; 0 = comb Off (old-style)
   wire [24:0] ioctl_addr     = 25'd0;
   wire [7:0]  ioctl_data     = 8'd0;
   wire [7:0]  ioctl_index    = 8'd0;
@@ -103,7 +102,7 @@ module tb_video_pipeline_regress;
     .machine_ce(machine_ce),
     .COLOR_LINE(COLOR_LINE), .SCREEN_MODE(SCREEN_MODE), .COLOR_PALETTE(COLOR_PALETTE),
     .RUN_FILL_OK(RUN_FILL_OK),
-    .v5_comb_mode(v5_comb_mode), .v5_black_stretch_st(2'd0), .v5_smoothing_st(1'b0), .v5_sharpness_st(1'b0),
+    .NTSC_VERTICAL_COMB(NTSC_VERTICAL_COMB),
     .ioctl_addr(ioctl_addr), .ioctl_data(ioctl_data), .ioctl_index(ioctl_index),
     .ioctl_download(ioctl_download), .ioctl_wr(ioctl_wr), .ioctl_wait(dut_wait),
     .use_composite(use_composite), .comp_preset(2'd0), .comp_hfix(1'b0), .comp_hue_adj(5'd0),
