@@ -39,11 +39,6 @@ assign HDMI_FREEZE = ss_busy;
 assign HDMI_BLACKOUT = 0;
 
 wire [1:0] ar = status[13:12];
-// Vertical crop debug knob (status[83:80]): value N removes 2*N lines
-// (N top + N bottom, symmetric). vcrop_base estimates the non-blanked line
-// count; CROP_SIZE = base - 2*N (lines to keep). Tune on hardware.
-wire [11:0] vcrop_base = 12'd200;
-wire [11:0] vcrop_size = vcrop_base - 12'(2 * status[83:80]);
 video_freak video_freak
 (
 	.*,
@@ -51,7 +46,7 @@ video_freak video_freak
 	.VGA_DE(),
 	.ARX((!ar) ? 12'd4 : (ar - 1'd1)),
 	.ARY((!ar) ? 12'd3 : 12'd0),
-	.CROP_SIZE(vcrop_size),
+	.CROP_SIZE(0),
 	.CROP_OFF(0),
 	.SCALE(status[15:14])
 );
@@ -107,7 +102,6 @@ parameter CONF_STR = {
 	"P2O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;", 
 	"P2OCD,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"P2OEF,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
-	"P2O[83:80],VCrop,0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30;",
 	"P2-;",
 	"P3,Hardware;",
 	"P3-;",	
@@ -305,7 +299,7 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(3)) hps_io
 	.status(status),
 	// Bit 45 ("Savestates to SDCard") and bits [34:33] (Disk drive sound) are live user toggles
 	.status_in({status[127:120],                                        // top block: all NTSC knobs retired; bits free (core inputs hardwired 0)
-		status[119:80],                                          // 83:80 VCrop, 85:84 Beeper volume; rest free
+		status[119:80],                                          // 85:84 Beeper volume; rest free
 		status[79:65],                                          // bits 65-79 free
 		status[64],                                              // bit 64 free
 		status[63:57],                                          // bits 57-63 free
@@ -909,7 +903,7 @@ always @(posedge clk_sys) begin
 	end
 	else begin
 		if (~old_ack & sd_ack[1]) begin
-			hdd_read_pending <= 0;s
+			hdd_read_pending <= 0;
 			hdd_write_pending <= 0;
 			sd_rd[1] <= 0;
 			sd_wr[1] <= 0;
