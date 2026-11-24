@@ -218,16 +218,8 @@ module woz_floppy_controller #(
         end
     endgenerate
 
-    // Scan window: media is present (img_mounted, no scan failure) but the
-    // metadata scan has not completed (woz_valid low). disk_mounted is
-    // deliberately asserted at mount, BEFORE the scan (see the disk_mounted
-    // comment below), so the ROM may already be reading. bit_count=0 in this
-    // window means flux_drive never advances -> NO flux transitions at all ->
-    // RWTS sync timeout -> "I/O ERROR" (the exact failure the garbage-flux
-    // load-window design avoids; see ADDENDUM_WOZ_LOAD_IOERR_SCAN_WINDOW).
-    // Fix: emit deterministic non-silent garbage during the scan window -
-    // a nominal 5.25" track bit_count and a transition-rich 0x96 byte pattern
-    // (freshly-zeroed BRAMs would replay silence even with a non-zero count).
+    // Scan window: media present but metadata scan still in flight; present a
+    // nominal track length and transition-rich 0x96 so reads never see silence.
     wire scan_window = img_mounted && !scan_failed && !woz_valid;
     localparam [31:0] SCAN_BIT_COUNT = 32'd40000; // nominal 5.25" GCR track length
     localparam [7:0]  SCAN_FLUX_BYTE = 8'h96;     // classic GCR sync-style pattern
@@ -422,19 +414,14 @@ module woz_floppy_controller #(
     // SD Operation
     reg [15:0] blocks_processed;
 
-    // Track reads ask hps_io for up to 32 blocks (16 KB, its limit) per request.
-    // Every request is a round trip through MiSTer Main, which can take a
-    // millisecond or more when the HPS is busy; one request per 512-byte block
-    // made a track load slow enough after a step that copy-protected loaders
-    // timed out. Writes and the header scan stay single-block.
+    // Track reads ask hps_io for up to 32 blocks (16 KB, its limit) per HPS round
+    // trip; writes and the header scan stay single-block.
     wire [15:0] rd_blocks_left = trk_block_count - blocks_processed;
     wire [5:0]  rd_chunk_m1    = (rd_blocks_left > 16'd32) ? 6'd31 :
                                  (rd_blocks_left == 16'd0) ? 6'd0 : rd_blocks_left[5:0] - 6'd1;
     assign sd_blk_cnt = (state == S_READ_TRACK) ? rd_chunk_m1 : 6'd0;
-    // Main may answer with fewer blocks than requested (e.g. zipped or
-    // converted images served from RAM): advance by the blocks that actually
-    // arrived. rd_last_blk holds the block index of the most recent byte;
-    // every request starts at index 0, so it needs no reset.
+    // Main may answer short, so advance by the blocks actually arrived;
+    // rd_last_blk tracks the last block index (requests start at 0, no reset).
     reg  [4:0]  rd_last_blk;
     wire [15:0] rd_chunk       = {11'd0, rd_last_blk} + 16'd1;
     // BRAM block index of the byte currently arriving

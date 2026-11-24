@@ -3,16 +3,8 @@
 
 //-----------------------------------------------------------------------------
 //
-// Native-rate Apple ][ RGB video renderer (NOT a line-doubler - see note)
-//
-// NOTE (2026-10-24): the historic title of this module was "A VGA
-// line-doubler", which is misleading and caused a downstream port to plan for
-// a doubled raster. It does NOT double lines. hcount/vcount free-run on
-// CLK_14M at native machine geometry; VGA_HBL/VGA_VBL are native
-// (~filtered_timing_active / vbl_delayed); previous_line_rgb[0:559] is a
-// ONE-LINE history for the vertical comb / HGR artifacting, not a doubling
-// buffer. video_pipeline.sv likewise derives its sync from native machine
-// blanking, so the pipeline output is a native-rate 560x192 RGB stream.
+// Native-rate Apple ][ RGB renderer (560x192, no line doubling): counters free-run
+// on CLK_14M; previous_line_rgb holds one line of history for the vertical comb filter.
 //
 // Original implementation by Stephen A. Edwards, sedwards@cs.columbia.edu
 // Palette and color enhancements by Newsdee, newsdee@gmail.com
